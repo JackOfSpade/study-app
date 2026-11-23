@@ -4,7 +4,7 @@ import test from "node:test";
 import { taskInstructions, validateAnswer } from "../scripts/lib/ai-contracts.mjs"; // prettier-ignore
 import {
   HELP_GATE_GUIDANCE,
-  fillClosingHelp,
+  fillOmittedHelp,
   helpGateProblem,
   helpStreamGate,
   unlockedHelp,
@@ -101,27 +101,85 @@ test("the relay requires the declaration; the app tolerates an older relay", () 
 
 test("a closing reply without a declaration reads as no help only while nothing is unlocked", () => {
   const closing = reply(undefined, true) as Record<string, unknown>;
-  assert.equal(fillClosingHelp(gated(), closing), true);
+  assert.equal(fillOmittedHelp(gated(), closing), "closing");
   assert.deepEqual(closing.help, help());
   assert.equal(helpGateProblem(gated(), closing, true), undefined);
   // A hint was unlocked: the declaration may record a given step, so it stays required.
   const unlocked = reply(undefined, true) as Record<string, unknown>;
-  assert.equal(fillClosingHelp(gated(["a"]), unlocked), false);
+  assert.equal(fillOmittedHelp(gated(["a"]), unlocked), undefined);
   assert.match(helpGateProblem(gated(["a"]), unlocked, true)!, /requires help/);
   // A follow-up still has to declare its rung.
   const open = reply(undefined) as Record<string, unknown>;
-  assert.equal(fillClosingHelp(gated(), open), false);
+  assert.equal(fillOmittedHelp(gated(), open), undefined);
   assert.equal(open.help, undefined);
   // A request from before the ladder is left alone.
   const old = reply(undefined, true) as Record<string, unknown>;
-  assert.equal(fillClosingHelp({ mode: "terminal-dialogue" }, old), false);
+  assert.equal(fillOmittedHelp({ mode: "terminal-dialogue" }, old), undefined);
   // A declaration that is present is never replaced.
   const declared = reply(help({ nudges: ["a"] }), true) as Record<
     string,
     unknown
   >;
-  assert.equal(fillClosingHelp(gated(), declared), false);
+  assert.equal(fillOmittedHelp(gated(), declared), undefined);
   assert.deepEqual(declared.help, help({ nudges: ["a"] }));
+});
+
+test("a reply that only accepts a part reads as no help when it omits the declaration", () => {
+  const staged = (stage: object, unlocked: string[] = []) => ({
+    ...gated(unlocked),
+    stage,
+  });
+  const facet = (status: string) => ({ id: "a", status });
+  const accepting = (over: Record<string, unknown> = {}) =>
+    ({
+      text: "Part 2 is accepted.",
+      complete: false,
+      partComplete: true,
+      knowledge: { facets: [facet("demonstrated"), facet("implied")] },
+      ...over,
+    }) as Record<string, unknown>;
+  const open = { part: 2, of: 3 };
+  // The reply the relay rejected on 2026-11-23: part 2 of 3 accepted, no help.
+  const accepted = accepting();
+  assert.equal(fillOmittedHelp(staged(open), accepted), "part-accepting");
+  assert.deepEqual(accepted.help, help());
+  validateAnswer({ operation: "tutor", payload: staged(open) }, accepted);
+  // Everything else on a part still has to declare its rung.
+  const refused: [string, object, Record<string, unknown>][] = [
+    [
+      "a gap",
+      staged(open),
+      accepting({ knowledge: { facets: [facet("gap")] } }),
+    ],
+    ["an outcome", staged(open), accepting({ outcome: "gap" })],
+    [
+      "a declared-gap signal",
+      staged(open),
+      accepting({
+        knowledge: {
+          facets: [facet("demonstrated")],
+          signal: { fluency: "declared-gap" },
+        },
+      }),
+    ],
+    ["no knowledge", staged(open), accepting({ knowledge: undefined })],
+    ["no facets", staged(open), accepting({ knowledge: { facets: [] } })],
+    ["damaged facets", staged(open), accepting({ knowledge: { facets: [1] } })],
+    ["a confirmed part", staged({ ...open, confirmed: true }), accepting()],
+    ["an unlocked facet", staged(open, ["a"]), accepting()],
+    ["the last part", staged({ part: 3, of: 3 }), accepting()],
+    ["a part still open", staged(open), accepting({ partComplete: false })],
+    ["no stage", gated(), accepting()],
+  ];
+  for (const [name, payload, answer] of refused) {
+    assert.equal(fillOmittedHelp(payload, answer), undefined, name);
+    assert.equal(answer.help, undefined, name);
+    assert.match(
+      helpGateProblem(payload, answer, true)!,
+      /requires help/,
+      name,
+    );
+  }
 });
 
 test("the relay's answer validation applies the ladder", () => {

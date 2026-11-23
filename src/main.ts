@@ -33,7 +33,7 @@ import { createLessons } from "./lesson";
 import { createLessonSurface, type LessonSurface } from "./lesson-surface";
 import { lessonStore } from "./lesson-store";
 import { moveToLiveStudy } from "./live-study";
-import { openPart, questionHtml } from "./question-parts";
+import { nextPartReady, openPart, questionHtml } from "./question-parts";
 import type { Encounter, StudyRecord, Roadmap } from "./model";
 import {
   decode,
@@ -63,11 +63,20 @@ import {
   createTerminalPanels,
   dialogueStatus,
   provenanceText,
+  speakerLabel,
 } from "./terminal-panels";
 import { settleRequest } from "./terminal-request";
 import { emptyRecord } from "./record";
 
 const app = $("#app");
+/** The build the app server is serving right now, for bug reports. */
+const serverBuild = () =>
+  fetch("/_app-health", { signal: AbortSignal.timeout(3000) })
+    .then((r) => r.json())
+    .then((health) => String(health.build).slice(0, 16))
+    .catch(() => undefined);
+/** The build this page loaded with: asked once, as the page starts. */
+const loadedBuild = serverBuild();
 const roadmap: Roadmap = await fetch("/curriculum.json").then((r) => r.json());
 let studyRecord: StudyRecord,
   saveError = "",
@@ -539,12 +548,17 @@ mountBugReport({
       const node = document.querySelector<HTMLElement>(selector);
       return node && !node.hidden ? (node.textContent ?? "").trim() : "";
     };
-    const build = await fetch("/_app-health", {
-      signal: AbortSignal.timeout(3000),
-    })
-      .then((r) => r.json())
-      .then((health) => String(health.build).slice(0, 16))
-      .catch(() => undefined);
+    // The page may have been open across a deploy: name the build it loaded
+    // with, and the server's current one when that has moved on.
+    const [loaded, current] = await Promise.all([loadedBuild, serverBuild()]);
+    const build = loaded
+      ? current && current !== loaded
+        ? `${loaded} (loaded with this page; the server now has ${current})`
+        : loaded
+      : current
+        ? `${current} (the server's current build; the build this page loaded with is unknown)`
+        : undefined;
+    const part = e && e.state !== "consumed" ? openPart(e) : undefined;
     return {
       url: location.origin + location.pathname,
       build,
@@ -575,10 +589,13 @@ mountBugReport({
             state: e.state,
             error: e.error,
             generation: e.generation,
+            part: part
+              ? `${part.part} of ${part.of}${nextPartReady(e) ? " (accepted; the next part is offered)" : ""}`
+              : undefined,
             prompt: e.problem?.prompt,
             messages: e.tutor.map(({ kind, author, text }) => ({
               kind,
-              author,
+              author: speakerLabel(author),
               text,
             })),
             requests: (e.tutorRequests ?? []).map(({ state, error }) => ({
@@ -948,7 +965,10 @@ $("#terminal-connect-retry").onclick = () => void recheckConnection();
 // a typed reply is judged as a new attempt.
 $("#help-accept").onclick = () => {
   const e = active ? studyRecord.encounters[active] : undefined;
-  if (!e || !offeredHelp(e).length) return;
+  const facets = e ? offeredHelp(e).length : 0;
+  if (!e || !facets) return;
+  // The one action that changes how a part is credited: counted, never named.
+  logEvent("help-offer-answered", { answer: "accept", facets });
   startTerminalRequest(() =>
     send(studyRecord, e, "Yes, give me a hint.", roadmap, true),
   );
@@ -956,7 +976,9 @@ $("#help-accept").onclick = () => {
 $("#help-retry").onclick = () => $<HTMLTextAreaElement>("#chat-input").focus();
 $("#help-skip").onclick = () => {
   const e = active ? studyRecord.encounters[active] : undefined;
-  if (!e || !offeredHelp(e).length) return;
+  const facets = e ? offeredHelp(e).length : 0;
+  if (!e || !facets) return;
+  logEvent("help-offer-answered", { answer: "move-on", facets });
   startTerminalRequest(() =>
     send(studyRecord, e, "I want to move on.", roadmap),
   );

@@ -102,8 +102,37 @@ function usageSection(path, limits) {
       if (isRecord(row)) rows.push(row);
     } catch {}
   }
-  const recent = rows.slice(-limits.usageRows);
+  // The log gains a row when a call ends but stamps it with when the call
+  // started, so a long call lands after shorter ones that began later. The
+  // newest rows by file order are the right set; shown in start order they
+  // read as the `at` column says.
+  const recent = rows
+    .slice(-limits.usageRows)
+    .sort((a, b) =>
+      typeof a.at === "string" && typeof b.at === "string"
+        ? a.at < b.at
+          ? -1
+          : a.at > b.at
+            ? 1
+            : 0
+        : 0,
+    );
   if (!recent.length) return "## Recent AI calls\n\n_None recorded._";
+  // The two columns keep their names from earlier builds, whose rows carried
+  // `phase` and `conversationTurn`. Today's rows say which kind of tutor
+  // reply it was (or how many parts a generated question has) and how many
+  // messages the conversation held, with the open part where there is one.
+  const phase = (row) =>
+    row.phase ??
+    row.mode ??
+    (Number.isInteger(row.parts) ? `${row.parts} parts` : undefined);
+  const turn = (row) =>
+    row.conversationTurn ??
+    (row.turn === null || row.turn === undefined
+      ? undefined
+      : Number.isInteger(row.part) && Number.isInteger(row.ofParts)
+        ? `${row.turn} (part ${row.part}/${row.ofParts})`
+        : row.turn);
   const cell = (value) =>
     value === null || value === undefined
       ? ""
@@ -114,8 +143,8 @@ function usageSection(path, limits) {
       `| ${[
         row.at,
         row.operation,
-        row.phase,
-        row.conversationTurn,
+        phase(row),
+        turn(row),
         row.attempt,
         `${row.alias ?? ""}/${row.effort ?? ""}`,
         row.model,
@@ -131,7 +160,7 @@ function usageSection(path, limits) {
   return [
     "## Recent AI calls",
     "",
-    `Newest ${recent.length} of the usage log; ${failed} did not end accepted. Times are UTC.`,
+    `Newest ${recent.length} of the usage log; ${failed} did not end accepted. Times are UTC and say when each call started; rows are in that order. Phase is the kind of tutor reply or the number of parts in a generated question; turn counts the conversation's messages. Rejected calls record neither.`,
     "",
     "| at | operation | phase | turn | attempt | alias/effort | model | outcome | seconds | output tokens | cost USD |",
     "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",

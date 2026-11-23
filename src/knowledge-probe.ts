@@ -62,7 +62,7 @@ export interface KnowledgeProbe {
   facets: ProbeFacet[];
   turns: ProbeTurn[];
 }
-/** A learner-declared gap recorded when the terminal conceded the key. */
+/** A learner-declared gap recorded when a question was closed on it. */
 export interface KnowledgeGapRecord {
   id: string;
   encounter: string;
@@ -115,7 +115,7 @@ interface ProbeState {
 }
 
 export const PROBE_STANCE =
-  'Assume the learner already has this knowledge; they will tell you when they do not. Before interpreting uncertainty as missing knowledge, check whether the prompt is ambiguous or omits material scenario, implementation, business rules or timing facts. Acknowledge missing facts and clarify only what makes the existing task answerable; identify any added facts as a clarification, without revealing the concept\'s solution or adding tasks, rubric demands or a new product decision. Distinguish an intentional design choice from an unspecified implementation detail. When the prompt leaves a design choice open, accept reasonable examples or assumptions the learner explicitly chooses and explains; do not demand a hidden preferred implementation. Requesting clarification alone is not evidence of partial knowledge, guessing or a gap. For a clarification-only turn, keep complete:false and omit knowledge findings and knowledge.signal; continue knowledge probing after the task is clear. Do not walk the rubric item by item. Open with the single highest-leverage question: focused reasoning whose correct answer necessarily entails other facets already in the issued task. Do not widen the question or add hidden project demands. When a demonstrated facet X necessarily entails Y and Z, mark Y and Z implied by X instead of asking them separately. Read how the answer is given, but do not turn uncertainty into a gap without evidence. Ask about a facet only when nothing so far establishes it, and probe further only after a miss, to locate the gap. Facets of the same kind, the same reasoning applied to different items, are one facet repeated: one general statement, or the point worked for one item, establishes all of them (mark the rest implied by the demonstrated one); ask about another item only when its answer differs, and name it. At D1 ask for conceptual reasoning on the issued task, not implementation, specialist protocol internals or exhaustive prerequisite recall. A prerequisite clarification may descend at most one level below an original question facet; never recursively drill into prerequisites of prerequisites. Supplied setup facts such as a completed secure connection are not assessment targets. When the learner states they do not know an assessed facet or asks for its answer, do not lecture and do not refuse to let them move on. This does not prevent a brief definition of non-assessed supporting terminology. Record only the specific facet they explicitly do not know; leave all unasked siblings unknown. If they want to clarify which part is missing, ask at most one directly relevant prerequisite question, one level down, rather than making them finish a diagnostic tree. A correct part does not establish its apex: known parts never imply the apex. If they choose to continue, return to the apex and ask it again; a since-established part clears the way to re-ask the apex. Return complete:true with outcome:"gap" when the learner declares the remaining task unknown or wants to move on, naming only the explicitly established gaps. Unasked details remain unassessed and never prevent completion. A declared gap is a study target, never mastery or a reason to keep the learner at the terminal. ' +
+  'Assume the learner already has this knowledge; they will tell you when they do not. Before interpreting uncertainty as missing knowledge, check whether the prompt is ambiguous or omits material scenario, implementation, business rules or timing facts. Acknowledge missing facts and clarify only what makes the existing task answerable; identify any added facts as a clarification, without revealing the concept\'s solution or adding tasks, rubric demands or a new product decision. Distinguish an intentional design choice from an unspecified implementation detail. When the prompt leaves a design choice open, accept reasonable examples or assumptions the learner explicitly chooses and explains; do not demand a hidden preferred implementation. Requesting clarification alone is not evidence of partial knowledge, guessing or a gap. For a clarification-only turn, keep complete:false and omit knowledge findings and knowledge.signal; continue knowledge probing after the task is clear. Do not walk the rubric item by item. Open with the single highest-leverage question: focused reasoning whose correct answer necessarily entails other facets already in the issued task. Do not widen the question or add hidden project demands. When a demonstrated facet X necessarily entails Y and Z, mark Y and Z implied by X instead of asking them separately. Read how the answer is given, but do not turn uncertainty into a gap without evidence. Ask about a facet only when nothing so far establishes it, and probe further only after a miss, to locate the gap. Facets of the same kind, the same reasoning applied to different items, are one facet repeated: one general statement, or the point worked for one item, establishes all of them (mark the rest implied by the demonstrated one); ask about another item only when its answer differs, and name it. At D1 ask for conceptual reasoning on the issued task, not implementation, specialist protocol internals or exhaustive prerequisite recall. A prerequisite clarification may descend at most one level below an original question facet; never recursively drill into prerequisites of prerequisites. Supplied setup facts such as a completed secure connection are not assessment targets. When the learner states they do not know an assessed facet or asks for its answer, do not lecture and do not refuse to let them move on. This does not prevent a brief definition of non-assessed supporting terminology. Record only the specific facet they explicitly do not know; leave all unasked siblings unknown. If they want to clarify which part is missing, ask at most one directly relevant prerequisite question, one level down, rather than making them finish a diagnostic tree. A correct part does not establish its apex: known parts never imply the apex. If they choose to continue, return to the apex and ask it again; a since-established part clears the way to re-ask the apex. Return complete:true with outcome:"gap" when the learner declares the remaining task unknown or wants to move on, naming only the explicitly established gaps. Unasked details remain unassessed and never prevent completion. A declared gap is a study target, never mastery or a reason to keep the learner on the question. ' +
   QUESTION_ADAPTATION_GUIDANCE;
 
 export const TERMINAL_DIALOGUE_FORMAT = {
@@ -247,7 +247,7 @@ export const encounterProbeContract = (
 /** Completion feedback is bounded by the completion verdict. */
 export const FEEDBACK_LIMIT = 8000;
 /**
- * The feedback recorded on the submission when the key is conceded on a
+ * The feedback recorded on the submission when the question is closed on a
  * declared gap. It always fits the completion verdict's bound: the gap list
  * shrinks first, then the tail of the tutor's reply. The reply itself is
  * delivered whole as the tutor message; only this record is bounded.
@@ -258,7 +258,7 @@ export function concessionFeedback(
   limit = FEEDBACK_LIMIT,
 ) {
   const head = (list: string) =>
-    `Key conceded on a declared knowledge gap (${list}). Recorded for later study; no mastery claimed.`;
+    `Question closed on a declared knowledge gap (${list}). Recorded for later study; no mastery claimed.`;
   const full = gapDescriptions.length
     ? gapDescriptions.join("; ")
     : "recorded earlier";
@@ -444,13 +444,17 @@ export function probeState(e: Pick<Encounter, "probe">): ProbeState {
   };
 }
 
-/** One line for the terminal progress summary. */
-export function probeSummary(e: Pick<Encounter, "probe">): string {
+/** One line for the progress summary above the conversation. `signal`
+ * adds how the latest answer was given, which describes an open question. */
+export function probeSummary(
+  e: Pick<Encounter, "probe">,
+  { signal = true } = {},
+): string {
   const s = probeState(e);
   if (!s.total) return "";
   const parts = [`${s.established} of ${s.total} facets established`];
   if (s.gaps) parts.push(`${s.gaps} recorded gap${s.gaps === 1 ? "" : "s"}`);
-  if (s.lastSignal)
+  if (signal && s.lastSignal)
     parts.push(
       `last answer ${s.lastSignal.fluency === "declared-gap" ? "declared a gap" : s.lastSignal.fluency}`,
     );
@@ -470,7 +474,7 @@ const chain = (r: { partOf?: ProbeFacet }) =>
   r.partOf ? ` (part of ${r.partOf.description})` : "";
 
 /**
- * Record one validated terminal reply. When the terminal concedes the key on
+ * Record one validated terminal reply. When the reply closes the question on
  * a declared gap, every facet not established by then is recorded as a gap
  * in the carried study state, once per encounter facet.
  */
@@ -514,8 +518,8 @@ export function recordProbeTurn(
     questionSequence: context.questionSequence,
     at,
   });
-  // Chat after the key was awarded is kept as probe history, but it neither
-  // rewrites what the terminal established nor opens new study targets.
+  // Chat after the question was finished is kept as probe history, but it
+  // neither rewrites what the question established nor opens new study targets.
   if (e.state === "consumed") return [];
   syncEstablished(g, e, context, at);
   // Leaving one part of a staged question concedes what that reply names,
@@ -771,7 +775,7 @@ export function knowledgeGapContext(g: StudyRecord, track: string): string {
   const lines = [];
   if (open.length)
     lines.push(
-      "Learner-declared knowledge gaps recorded at earlier terminals (study targets, not failures). Ask about these directly, then re-ask whatever facet they blocked:\n" +
+      "Learner-declared knowledge gaps recorded at earlier questions (study targets, not failures). Ask about these directly, then re-ask whatever facet they blocked:\n" +
         open
           .map(
             (r) =>
@@ -806,7 +810,7 @@ export function knowledgeEstablishedContext(
   );
   if (!known.length) return "";
   return (
-    "Facets already established at earlier terminals (answered, or implied by a correct answer). Treat them as known: do not re-probe them unless the current answer contradicts one. Terminal observations, not curriculum mastery:\n" +
+    "Facets already established at earlier questions (answered, or implied by a correct answer). Treat them as known: do not re-probe them unless the current answer contradicts one. Observations from those questions, not curriculum mastery:\n" +
     known
       .slice(-40)
       .map(
@@ -856,7 +860,7 @@ interface ProbeRecords {
   }[];
 }
 export const PROBE_RECORDS_NOTE =
-  "Terminal probe observations for this track, never curriculum mastery. Build the question around openGaps inside the eligible scope and make the facet they blocked the question's apex. Only an openGap with reuseInScopeDefinitions:true (recorded on exactly the scope being generated) may contribute its exact facet id and description to scopeDefinitions; for every other gap, copy existingScopeDefinitions for that scope exactly and use the gap only to shape the prompt and apex. Never rewrite an existing stable scope definition. Do not spend the question on facets listed as established unless the scope requires them; a closedGap means the facet it blocked should be asked again, since known parts never imply it. The scheduler alone chooses the scope; copy the eligible contract exactly.";
+  "Knowledge probe observations for this track, never curriculum mastery. Build the question around openGaps inside the eligible scope and make the facet they blocked the question's apex. Only an openGap with reuseInScopeDefinitions:true (recorded on exactly the scope being generated) may contribute its exact facet id and description to scopeDefinitions; for every other gap, copy existingScopeDefinitions for that scope exactly and use the gap only to shape the prompt and apex. Never rewrite an existing stable scope definition. Do not spend the question on facets listed as established unless the scope requires them; a closedGap means the facet it blocked should be asked again, since known parts never imply it. The scheduler alone chooses the scope; copy the eligible contract exactly.";
 export function probeRecordsForTrack(
   g: StudyRecord,
   track: string,

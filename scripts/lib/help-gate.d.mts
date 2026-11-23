@@ -19,7 +19,8 @@ export function helpGateProblem(
 export function helpStreamGate(
   payload: unknown,
 ): ((raw: string) => boolean) | undefined;
-export function fillClosingHelp(
+/** Which kind of reply had its missing declaration read as no help, if any. */
+export function fillOmittedHelp(
   payload: unknown,
   answer: Record<string, unknown>,
-): boolean;
+): "closing" | "part-accepting" | undefined;

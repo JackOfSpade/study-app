@@ -40,4 +40,8 @@ if (
   process.argv[1] &&
   import.meta.url === pathToFileURL(resolve(process.argv[1])).href
 )
-  await startDev();
+  // A bridge that cannot be started is said in one line, not as a stack trace.
+  await startDev().catch((error) => {
+    console.error(`Development server could not start: ${error.message}`);
+    process.exitCode = 1;
+  });

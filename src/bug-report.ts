@@ -46,8 +46,8 @@ const list = (rows: [string, string | undefined][]) =>
     .map(([name, value]) => `- ${name}: ${value.replace(/\s+/g, " ")}`)
     .join("\n");
 
-/** One run as compact lines: its audit events in full, then its newest
- * detail entries. Unreadable diagnostics are reported, never thrown. */
+/** One run as compact lines: its id and start, then its newest detail
+ * entries. Unreadable diagnostics are reported, never thrown. */
 function diagnostics(logs: string, budget: number) {
   let runs: unknown;
   try {
@@ -61,16 +61,12 @@ function diagnostics(logs: string, budget: number) {
   for (const run of [...runs].reverse()) {
     // Stored diagnostics may be damaged; a report must still be produced.
     if (!isRecord(run)) continue;
-    const { entries: rawEntries, audit, ...head } = run;
-    const { events: rawEvents, ...summary } = isRecord(audit) ? audit : {};
+    // `audit` was a field of runs written by earlier builds; nothing fills
+    // it now, so a stray one is left out, not echoed.
+    const { entries: rawEntries, audit: _audit, ...head } = run;
     const entries = Array.isArray(rawEntries) ? rawEntries : [];
-    const events = Array.isArray(rawEvents) ? rawEvents : [];
-    const lines = (items: unknown[]) =>
-      items.map((item) => JSON.stringify(item));
-    let detail = lines(entries);
-    const fixed =
-      JSON.stringify({ ...head, audit: summary }).length +
-      lines(events).join("\n").length;
+    let detail = entries.map((item) => JSON.stringify(item));
+    const fixed = JSON.stringify(head).length;
     // Drop the oldest detail entries until this run fits what is left.
     let size = detail.reduce((sum, line) => sum + line.length + 1, 0);
     let dropped = 0;
@@ -85,11 +81,7 @@ function diagnostics(logs: string, budget: number) {
       [
         `### Run ${String(head.id ?? "").slice(0, 12)} started ${String(head.started ?? "unknown")}`,
         "",
-        fence(JSON.stringify({ ...head, audit: summary }, null, 1), "json"),
-        "",
-        `Lifecycle events (${events.length}):`,
-        "",
-        fence(lines(events).join("\n") || "(none)", "json"),
+        fence(JSON.stringify(head, null, 1), "json"),
         "",
         `Detail entries (${detail.length}${dropped ? `, ${dropped} older omitted for size` : ""}):`,
         "",

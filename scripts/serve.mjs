@@ -145,6 +145,37 @@ export async function createAppServer({
   });
 }
 
+/**
+ * Start or reconnect the study bridge before the app listens, waiting when it
+ * cannot be started. An uncaught failure here (an ownership record for another
+ * copy of the project, a stranger on the bridge's port, a bridge that does not
+ * answer) used to end the process with a stack trace, and the supervisor
+ * relaunched it every ten seconds. Each distinct reason is logged once, and
+ * the wait ends by itself when the cause is cleared.
+ */
+export async function waitForBridge(
+  ensure,
+  {
+    retryMs = 15_000,
+    report = (message) => console.error(message),
+    pause = (ms) => new Promise((done) => setTimeout(done, ms)),
+  } = {},
+) {
+  for (let last; ;) {
+    try {
+      return await ensure();
+    } catch (error) {
+      const reason = String(error?.message ?? error);
+      if (reason !== last)
+        report(
+          `Study bridge could not be started: ${reason}; trying again every ${Math.round(retryMs / 1000)} s`,
+        );
+      last = reason;
+      await pause(retryMs);
+    }
+  }
+}
+
 if (
   process.argv[1] &&
   import.meta.url === pathToFileURL(resolve(process.argv[1])).href
@@ -155,7 +186,7 @@ if (
     throw Error("Invalid app port");
   // Validate the build before starting or reconnecting any background service.
   const server = await createAppServer({ restartBridge: () => ensureBridge() });
-  await ensureBridge();
+  await waitForBridge(() => ensureBridge());
   // A second copy (a dev server, or an older instance still shutting down) can
   // hold the port. Crashing here made the supervisor relaunch every ten seconds
   // and write a stack trace each time; wait for the port instead, saying so once.

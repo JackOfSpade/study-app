@@ -111,6 +111,24 @@ test("tutor instructions request topic assessments only on completion, without C
   assert.ok(!/chatgpt/i.test(system));
 });
 
+test("only the tutor is told to write help before text, in every tutor mode alike", () => {
+  const textFirst = "When the object has a text field, write it first.";
+  const dialogue = buildPrompt("tutor", {
+    mode: "terminal-dialogue",
+    helpPolicy: { unlocked: [] },
+  }).system;
+  assert.ok(!dialogue.includes(textFirst));
+  assert.ok(dialogue.includes("write help first and text straight after it"));
+  assert.ok(dialogue.includes("otherwise write the text field first"));
+  assert.ok(dialogue.includes("return {help:{nudges,hints,gives,offers}"));
+  // One sentence for the whole operation, so the opening never differs by mode.
+  const review = buildPrompt("tutor", { mode: "terminal-review" }).system;
+  assert.equal(review.slice(0, 400), dialogue.slice(0, 400));
+  // Calls with no help declaration keep the plain rule: lesson-chat rejects a help key.
+  for (const operation of ["generate", "lesson-chat", "assess"])
+    assert.ok(buildPrompt(operation, {}).system.includes(textFirst), operation);
+});
+
 test("only the observations of topicAssessmentContext stay in the tutor message", () => {
   const prompt = buildPrompt("tutor", {
     mode: "terminal-dialogue",
@@ -148,12 +166,25 @@ test("a tutor request's changing parts never alter its system prompt", () => {
   for (const later of [
     turn(
       "two",
-      "\n\nFacets already established at earlier terminals (answered): a",
+      "\n\nFacets already established at earlier questions (answered): a",
       [{ id: "a" }, { id: "a-part" }],
       ["a"],
     ),
     turn(
       "three",
+      "\n\nLearner-declared knowledge gaps recorded at earlier questions: b",
+      [{ id: "a" }],
+      [],
+    ),
+    // A request saved by an earlier build still carries the old wording.
+    turn(
+      "saved-facets",
+      "\n\nFacets already established at earlier terminals (answered): a",
+      [{ id: "a" }],
+      [],
+    ),
+    turn(
+      "saved-gaps",
       "\n\nLearner-declared knowledge gaps recorded at earlier terminals: b",
       [{ id: "a" }],
       [],
@@ -441,6 +472,34 @@ test("a closing tutor reply that omits help is accepted without a correction rou
   );
 });
 
+test("a part-accepting tutor reply that omits help is accepted without a correction round", async () => {
+  const accepting = (status) =>
+    `{"text":"Part 2 is accepted.","complete":false,"partComplete":true,"knowledge":{"facets":[{"id":"f","status":"${status}"}]}}`;
+  const payload = {
+    mode: "terminal-dialogue",
+    helpPolicy: { unlocked: [] },
+    stage: { part: 2, of: 3 },
+  };
+  const calls = [];
+  const answer = await gateway([accepting("demonstrated")], calls, {
+    validate: validateAnswer,
+  }).run("tutor", payload);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(answer.help, {
+    nudges: [],
+    hints: [],
+    gives: [],
+    offers: [],
+  });
+  // A part the learner gave up may come with the answer stated: still required.
+  await assert.rejects(
+    gateway([accepting("gap"), accepting("gap")], [], {
+      validate: validateAnswer,
+    }).run("tutor", payload),
+    { code: "CLAUDE_INVALID_ANSWER" },
+  );
+});
+
 test("a rejected reply's logged skeleton keeps structure and drops long text", () => {
   assert.equal(
     replySkeleton(
@@ -448,6 +507,36 @@ test("a rejected reply's logged skeleton keeps structure and drops long text", (
     ),
     '{"text":"<48>"),"complete":false}',
   );
+});
+
+test("a rejected reply's logged skeleton never carries prose, quoted phrases or an unterminated string", () => {
+  // A reply written as prose, as on 2026-11-19: nothing readable is left.
+  const prose = replySkeleton(
+    'Nothing is wrong with saying "from 61% to 68%". That is the fix, see {k: v}.\nRewrite the sentence.',
+  );
+  assert.match(prose, /^<\d+ outside JSON>/);
+  assert.doesNotMatch(
+    prose.replace(/<\d+ outside JSON>/g, ""),
+    /[\p{L}\p{N}]/u,
+  );
+  // Prose before the object, as on 2026-11-20: the object keeps its structure.
+  assert.equal(
+    replySkeleton(
+      'Part 2 is accepted. You chose `HeapQueue`.\n{"text":"long long long long long long long","complete":false,"knowledge":{"facets":[{"id":"f1","status":"demonstrated"}]}}',
+    ),
+    '<43 outside JSON> {"text":"<34>","complete":false,"knowledge":{"facets":[{"id":"f1","status":"demonstrated"}]}}',
+  );
+  // A string that never closes takes everything after it.
+  assert.equal(
+    replySkeleton('{"complete":false,"text":"the learner said'),
+    '{"complete":false,"text":<17 outside JSON>',
+  );
+  assert.equal(
+    replySkeleton('```json\n{"complete":true}\n```'),
+    '<8 outside JSON> {"complete":true}<3 outside JSON>',
+  );
+  assert.equal(replySkeleton(undefined), "");
+  assert.equal(replySkeleton(`{"a":[${"1,".repeat(2000)}1]}`).length, 1503);
 });
 
 test("a rejected answer gets one correction, then fails plainly", async () => {

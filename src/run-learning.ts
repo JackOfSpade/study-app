@@ -3,6 +3,28 @@ import { isRecord } from "./records";
 
 /** Static roadmap texts re-derivable from the curriculum; never re-read once settled. */
 const RELEASED_REQUEST_FIELDS = ["curriculum", "progressContext"] as const;
+/**
+ * What a settled tutor request also gives up: the instruction and reply
+ * format (constants of the code), and its own copies of the question, the
+ * probe and the whole conversation so far, its draft, submissions and run results, all of
+ * which the question itself holds. A settled request is never sent or read again, and
+ * the conversation copy made each one larger than the last, so a long
+ * conversation grew the save by tens of kilobytes per message. What stays
+ * identifies the request: its ids, mode, the learner's message, the draft
+ * revision, the open part and the help policy it was sent under.
+ */
+const RELEASED_TUTOR_FIELDS = [
+  ...RELEASED_REQUEST_FIELDS,
+  "instruction",
+  "responseFormat",
+  "messages",
+  "problem",
+  "probe",
+  "learning",
+  "workspace",
+  "submissions",
+  "executions",
+] as const;
 /** What a settled request keeps of its topic-assessment context. */
 const KEPT_TOPIC_CONTEXT_FIELDS = new Set([
   "topicIds",
@@ -11,8 +33,11 @@ const KEPT_TOPIC_CONTEXT_FIELDS = new Set([
   "frozenBeforeCurrentConversation",
 ]);
 
-/** Drop static context from a stored request; keeps every auditable field. */
-function releaseRequestContext(job: { payloadJson: string }): boolean {
+/** Drop from a stored request what is held elsewhere; keeps what identifies it. */
+function releaseRequestContext(
+  job: { payloadJson: string },
+  fields: readonly string[] = RELEASED_REQUEST_FIELDS,
+): boolean {
   let payload: unknown;
   try {
     payload = JSON.parse(job.payloadJson);
@@ -22,7 +47,7 @@ function releaseRequestContext(job: { payloadJson: string }): boolean {
   if (!isRecord(payload)) return false;
   const record = payload;
   let removed = false;
-  for (const field of RELEASED_REQUEST_FIELDS)
+  for (const field of fields)
     if (field in record) {
       delete record[field];
       removed = true;
@@ -51,7 +76,7 @@ export function settleTutorRequest(
   state: "applied" | "superseded",
 ): void {
   job.state = state;
-  releaseRequestContext(job);
+  releaseRequestContext(job, RELEASED_TUTOR_FIELDS);
 }
 
 /** Saved question session from the retired chat (structural; mirrors the model type). */
@@ -82,8 +107,9 @@ export function closeDirectStudy(e: Encounter): void {
 export function releaseSettledRequests(e: Encounter, all = false): void {
   for (const job of e.tutorRequests ?? [])
     if (all || job.state === "applied" || job.state === "superseded")
-      releaseRequestContext(job);
-  // A pending/interrupted direct question keeps its exact frozen payload even
+      releaseRequestContext(job, RELEASED_TUTOR_FIELDS);
+  // The retired chat's session keeps its question, which loading checks. A
+  // pending/interrupted direct question keeps its exact frozen payload even
   // when archived; only settled sessions may drop static context.
   const direct = directOf(e);
   if (

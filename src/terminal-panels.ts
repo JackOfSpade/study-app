@@ -20,7 +20,7 @@ import type { Encounter, StudyRecord, Roadmap } from "./model";
 /** What the question's conversation partner is called. */
 const TUTOR = "Tutor";
 /** Every saved reply carries this stored speaker name. */
-const speakerLabel = (author: string) =>
+export const speakerLabel = (author: string) =>
   author === "Terminal AI" ? TUTOR : author;
 
 /** One chat bubble: the speaker's name as plain text and the message as
@@ -69,7 +69,10 @@ export function provenanceText(studyRecord: StudyRecord, e: Encounter): string {
 
 /** The line above a solo conversation: its outcome, or how the probe stands. */
 export function dialogueStatus(studyRecord: StudyRecord, e: Encounter) {
-  const probeLine = probeSummary(e);
+  // "Last answer partial" describes how an answer was given while the
+  // question is open. Beside a final "Solved" it reads as a second verdict,
+  // and later discussion never updates it, so a finished question omits it.
+  const probeLine = probeSummary(e, { signal: e.state !== "consumed" });
   const recorded = encounterGaps(studyRecord, e);
   const conceded = recorded.filter((r) => !r.resolved);
   const closed = recorded.length - conceded.length;

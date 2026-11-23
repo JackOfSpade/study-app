@@ -820,7 +820,7 @@ test("cumulative state re-judges per facet and conceding records only unestablis
   assert.match(context, /I don't know the boundary/);
   assert.equal(knowledgeGapContext(g, "ZZ"), "");
   const known = knowledgeEstablishedContext(g, e.problem!.contract.track);
-  assert.match(known, /already established at earlier terminals/);
+  assert.match(known, /already established at earlier questions/);
   assert.match(known, /do not re-probe them/);
   assert.match(known, /Subtract outgoing, add incoming · demonstrated/);
   assert.match(
@@ -1633,7 +1633,7 @@ test("concession feedback always fits the completion bound, keeping the tutor's 
   const short = concessionFeedback(["Enumerative combinatorics"], "Recorded.");
   assert.equal(
     short,
-    "Key conceded on a declared knowledge gap (Enumerative combinatorics). Recorded for later study; no mastery claimed.\n\nRecorded.",
+    "Question closed on a declared knowledge gap (Enumerative combinatorics). Recorded for later study; no mastery claimed.\n\nRecorded.",
   );
   assert.match(concessionFeedback([], "x"), /\(recorded earlier\)/);
   // A reply that fits beside the note is kept whole.
@@ -1645,7 +1645,7 @@ test("concession feedback always fits the completion bound, keeping the tutor's 
   assert.equal(kept.length, FEEDBACK_LIMIT);
   assert.match(
     kept,
-    /^Key conceded on a declared knowledge gap \(1 recorded\)\. Recorded for later study; no mastery claimed\.\n\ny+…$/,
+    /^Question closed on a declared knowledge gap \(1 recorded\)\. Recorded for later study; no mastery claimed\.\n\ny+…$/,
   );
   // Many long gap descriptions shrink the list, never the reply.
   const many = Array.from(

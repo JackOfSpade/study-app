@@ -22,7 +22,7 @@ The policy asks for:
 - the contract and existing stable scope definitions copied exactly, with open knowledge gaps (`probeRecords`) as the apex of the question;
 - interview realism: the problem shapes, constraints and follow-ups a working interviewer would use. For an objective about the learner's own projects, the learner picks a real project of their own and the rubric judges structure and honesty, never particular facts; a critique of a supplied answer is the exception and is limited to four one-line facts and one short answer;
 - for the product-engineer profile, a consumer or creative web feature as the setting when the objective does not fix a domain (`careerScopeGuidance`);
-- variety: the request carries up to five earlier questions on the same objectives (`earlierQuestions`: title, a 160-character opening and the asks, never answers or tutor text), and a regenerated question's `replaces` carries the replaced asks, so the new question changes scenario and the shape of its ask.
+- variety: the request carries up to five earlier questions on the same objectives (`earlierQuestions`: title, a 160-character opening and the asks, never answers or tutor text), and a regenerated question's `replaces` carries the replaced asks, so the new question changes scenario and the shape of its ask. Questions replaced earlier on the same question (`discardedQuestions` on the saved question, at most five) lead `earlierQuestions`, so a second regeneration does not return to the first discarded scenario.
 
 `QUESTION_SHAPE_GUIDANCE` is the last block the generator reads. Answerability comes first: a fact a correct answer needs is never dropped. Beyond that:
 

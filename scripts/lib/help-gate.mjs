@@ -1,4 +1,5 @@
 import { isRecord as object } from "./is-record.mjs";
+import { closesPart } from "./question-parts.mjs";
 
 /**
  * The hint ladder. A tutor reply declares, per facet, how far its text went:
@@ -96,25 +97,65 @@ export function helpGateProblem(payload, answer, required = false) {
   return undefined;
 }
 
+/** Every facet the reply reports is one the learner showed, and nothing in
+ * the reply says they gave up: no outcome, no declared-gap signal. */
+const onlyEstablished = (answer) => {
+  const knowledge = object(answer.knowledge) ? answer.knowledge : undefined;
+  const facets = knowledge?.facets;
+  return (
+    answer.outcome === undefined &&
+    !(
+      object(knowledge?.signal) && knowledge.signal.fluency === "declared-gap"
+    ) &&
+    Array.isArray(facets) &&
+    facets.length > 0 &&
+    facets.every(
+      (facet) =>
+        object(facet) &&
+        (facet.status === "demonstrated" || facet.status === "implied"),
+    )
+  );
+};
+
 /**
- * A closing reply (complete:true) that leaves out its help declaration when
- * no facet was ever unlocked is read as declaring no help: with nothing
- * unlocked the tutor may not hint or give a step, and the gate does not check
- * a closing reply's rungs, so a correction round would only repeat the same
- * verdict at full cost. Returns true when it filled the declaration in.
+ * A reply that leaves out its help declaration is read as declaring no help
+ * in two cases, both only while no facet was ever unlocked, so the tutor may
+ * not hint or give a step at all. Returns which case filled the declaration
+ * in, or undefined when the reply is left as it was.
+ *
+ * "closing": the reply ends the question (complete:true). The gate does not
+ * check a closing reply's rungs, so a correction round would only repeat the
+ * same verdict at full cost.
+ *
+ * "part-accepting": the reply accepts the open part of a question worked in
+ * parts (partComplete:true before the last part) and every facet it reports
+ * is demonstrated or implied. Such a reply confirms and asks nothing, so the
+ * empty declaration is the only one that fits it. A reply that records a gap,
+ * carries an outcome or signals a declared gap (the learner gave the part up
+ * and the text may state the answer), one on a
+ * part already confirmed (the tutor may be explaining), and every ordinary
+ * follow-up still have to declare their rung: there the declaration is the
+ * only record of a nudge or an offer.
  */
-export function fillClosingHelp(payload, answer) {
+export function fillOmittedHelp(payload, answer) {
   const unlocked = unlockedBy(payload);
   if (
     !unlocked ||
     unlocked.length ||
     !object(answer) ||
-    answer.help !== undefined ||
-    answer.complete !== true
+    answer.help !== undefined
   )
-    return false;
-  answer.help = { nudges: [], hints: [], gives: [], offers: [] };
-  return true;
+    return undefined;
+  const filled =
+    answer.complete === true
+      ? "closing"
+      : closesPart(payload, answer) &&
+          payload.stage.confirmed !== true &&
+          onlyEstablished(answer)
+        ? "part-accepting"
+        : undefined;
+  if (filled) answer.help = { nudges: [], hints: [], gives: [], offers: [] };
+  return filled;
 }
 
 /**

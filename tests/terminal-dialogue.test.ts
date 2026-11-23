@@ -52,6 +52,44 @@ async function fixture(
     globalThis.fetch = original;
   }
 }
+test("a solved question's status drops how the last answer was given; an open one keeps it", async () =>
+  fixture(async (g, e, _calls, reply) => {
+    const facets = probeFacets(e.problem);
+    const partial = { fluency: "partial", note: "Synthetic" };
+    reply(async () =>
+      Response.json({
+        text: "One thing is still open.",
+        complete: false,
+        knowledge: {
+          facets: [{ id: facets[0].id, status: "demonstrated" }],
+          signal: partial,
+        },
+      }),
+    );
+    await send(g, e, "A first attempt", r);
+    assert.match(dialogueStatus(g, e).text, /last answer partial/);
+    reply(async () =>
+      Response.json({
+        text: "Accepted, with one refinement.",
+        complete: true,
+        outcome: "solved",
+        knowledge: {
+          facets: facets.map((f) => ({ id: f.id, status: "demonstrated" })),
+          signal: partial,
+        },
+      }),
+    );
+    await send(g, e, "The rest of the answer", r);
+    assert.equal(e.state, "consumed");
+    const solved = dialogueStatus(g, e).text;
+    assert.match(solved, /^Solved\. You can keep discussing the question\./);
+    assert.match(
+      solved,
+      new RegExp(`${facets.length} of ${facets.length} facets established\\.$`),
+    );
+    assert.doesNotMatch(solved, /last answer/);
+  }));
+
 test("one private tutor conversation accumulates answers and completes once, only on explicit completion", async () =>
   fixture(async (g, e, calls, reply) => {
     await send(g, e, "My initial prediction", r);
@@ -250,7 +288,7 @@ test("a declared gap lets the tutor concede the question, records the gap with t
     assert.equal(e.submissions[0].status, "complete");
     assert.match(
       e.submissions[0].feedback,
-      /Key conceded on a declared knowledge gap/,
+      /Question closed on a declared knowledge gap/,
     );
     assert.match(e.submissions[0].feedback, /no mastery claimed/);
     assert.match(e.submissions[0].content, /don't know what the boundary/);
@@ -289,7 +327,7 @@ test("a declared gap lets the tutor concede the question, records the gap with t
       assert.match(next.progressContext, /don't know what the boundary/);
       assert.match(
         next.progressContext,
-        /already established at earlier terminals/,
+        /already established at earlier questions/,
       );
       assert.ok(
         next.progressContext.includes(
@@ -448,7 +486,7 @@ test("a gap concession with a reply at the transport bound still completes and l
     assert.ok(e.submissions[0].feedback.length <= 8000);
     assert.match(
       e.submissions[0].feedback,
-      /^Key conceded on a declared knowledge gap[^\n]*\n\nRecorded as a gap\. x+…$/,
+      /^Question closed on a declared knowledge gap[^\n]*\n\nRecorded as a gap\. x+…$/,
     );
     // The tutor's full reply is still delivered as the message.
     assert.equal(

@@ -136,7 +136,7 @@ test("consecutive tutor turns of one question share a byte-identical system prom
   );
   assert.match(
     last.progressContext,
-    /already established at earlier terminals/,
+    /already established at earlier questions/,
   );
   const reference = JSON.parse(
     first.system.slice(first.system.indexOf('\n{"instruction"') + 1),

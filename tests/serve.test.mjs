@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { createAppServer } from "../scripts/serve.mjs";
+import { createAppServer, waitForBridge } from "../scripts/serve.mjs";
 
 async function listen(server) {
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -146,4 +146,34 @@ test("production refuses startup without a built entry point", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "study-no-build-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   await assert.rejects(createAppServer({ directory }), { code: "ENOENT" });
+});
+
+test("startup waits for a bridge that cannot be started, saying each reason once", async () => {
+  const failures = [
+    "Bridge ownership record belongs to another service",
+    "Bridge ownership record belongs to another service",
+    "Bridge service did not respond",
+  ];
+  const reported = [];
+  const pauses = [];
+  let calls = 0;
+  const result = await waitForBridge(
+    async () => {
+      calls++;
+      if (failures.length) throw Error(failures.shift());
+      return { reused: true };
+    },
+    {
+      retryMs: 15_000,
+      report: (message) => reported.push(message),
+      pause: async (ms) => void pauses.push(ms),
+    },
+  );
+  assert.deepEqual(result, { reused: true });
+  assert.equal(calls, 4);
+  assert.deepEqual(pauses, [15_000, 15_000, 15_000]);
+  assert.deepEqual(reported, [
+    "Study bridge could not be started: Bridge ownership record belongs to another service; trying again every 15 s",
+    "Study bridge could not be started: Bridge service did not respond; trying again every 15 s",
+  ]);
 });

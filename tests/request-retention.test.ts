@@ -81,14 +81,106 @@ test("an applied tutor job releases curriculum and progressContext but keeps its
     assert.equal(p.requestId, job.id);
     assert.equal(p.sessionId, `${e.runId}/${e.id}/private`);
     assert.equal(p.mode, "terminal-dialogue");
-    assert.ok(Array.isArray(p.messages));
-    assert.deepEqual(p.messages, calls[0].payload.messages);
-    assert.deepEqual(p.problem, calls[0].payload.problem);
+    assert.equal(p.prompt, "My first answer");
+    assert.deepEqual(p.helpPolicy, calls[0].payload.helpPolicy);
+    assert.equal(p.draftRevision, calls[0].payload.draftRevision);
+    // The question, probe, conversation and instruction live on the question
+    // and in the code; a settled request keeps no second copy of them.
+    for (const field of [
+      "messages",
+      "problem",
+      "probe",
+      "instruction",
+      "responseFormat",
+      "learning",
+      "workspace",
+      "submissions",
+      "executions",
+    ]) {
+      assert.ok(Object.hasOwn(calls[0].payload, field), `${field} was sent`);
+      assert.ok(!Object.hasOwn(p, field), `${field} was released`);
+    }
     assert.ok(
       JSON.stringify(calls[0].payload).length - job.payloadJson.length >=
         100_000,
     );
   }));
+
+test("settled tutor jobs stay small however long the conversation grows", async () =>
+  fixture(async (g, e, _calls, reply) => {
+    reply(async () => Response.json({ text: "Go on", complete: false }));
+    const sizes: number[] = [];
+    for (let i = 0; i < 8; i++) {
+      await send(g, e, `Answer ${i}: ${"words ".repeat(120)}`, r);
+      sizes.push(e.tutorRequests[i].payloadJson.length);
+    }
+    assert.ok(
+      e.tutorRequests.every((job: TutorRequest) => job.state === "applied"),
+    );
+    // Each keeps its own message and identity, never the conversation before it.
+    assert.ok(Math.max(...sizes) < 3_000, `largest settled job: ${sizes}`);
+    assert.ok(sizes[7] - sizes[0] < 200, `no growth with length: ${sizes}`);
+    // The conversation itself is untouched.
+    assert.equal(e.tutor.filter((m: any) => m.kind === "human").length, 8);
+  }));
+
+test("a save from before this release shrinks on load, and the retired chat's session keeps its question", () => {
+  const g = createRecord(717, r);
+  const e = Object.values(g.encounters)[0];
+  const full = {
+    requestId: "old-job",
+    sessionId: "s",
+    mode: "terminal-dialogue",
+    prompt: "kept",
+    instruction: "i".repeat(13_000),
+    responseFormat: "f".repeat(1_000),
+    probe: { facets: [] },
+    problem: { title: "t" },
+    messages: [{ kind: "human", text: "m".repeat(5_000) }],
+    learning: { track: "PY" },
+    workspace: "w".repeat(2_000),
+    submissions: [{ content: "c".repeat(2_000) }],
+    executions: [],
+  };
+  e.tutorRequests = [
+    {
+      id: "old-job",
+      provider: "claude-cli",
+      payloadJson: JSON.stringify(full),
+      questionSequence: 1,
+      state: "applied",
+    },
+  ];
+  const direct = {
+    id: "direct-1",
+    provider: "chatgpt-handoff",
+    questionFingerprint: "a".repeat(64),
+    state: "applied",
+    payloadJson: JSON.stringify({
+      requestId: "direct-1",
+      questionFingerprint: "a".repeat(64),
+      mode: "terminal-direct",
+      problem: { title: "kept" },
+      messages: [{ kind: "human", text: "kept" }],
+      curriculum: "c".repeat(1_000),
+    }),
+  };
+  (e as unknown as { directStudy: unknown }).directStudy = direct;
+  const loaded = recover(decode(encode(g))).encounters[e.id];
+  assert.deepEqual(parsed(loaded.tutorRequests![0]), {
+    requestId: "old-job",
+    sessionId: "s",
+    mode: "terminal-dialogue",
+    prompt: "kept",
+  });
+  const kept = parsed(
+    (loaded as unknown as { directStudy: { payloadJson: string } }).directStudy,
+  );
+  assert.deepEqual(kept.problem, { title: "kept" });
+  assert.deepEqual(kept.messages, [{ kind: "human", text: "kept" }]);
+  assert.equal(kept.mode, "terminal-direct");
+  assert.ok(!Object.hasOwn(kept, "curriculum"));
+});
 
 test("a settled job keeps only what identifies its topic-assessment context", () => {
   const g = createRecord(717, r);

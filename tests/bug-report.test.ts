@@ -49,19 +49,19 @@ test("the browser report carries hidden provenance and honours the opt-out", () 
   assert.match(full, /Started in 4 earlier runs/);
   assert.match(full, /SECRET-PROMPT/);
   assert.match(full, /interrupted \(timeout\)/);
-  assert.match(full, /study-request/);
+  assert.doesNotMatch(full, /study-request|Lifecycle events|"audit"/);
+  assert.match(full, /"id": "run-1"/);
   const lean = buildClientReport(snapshot(logs(3)), false);
   assert.doesNotMatch(lean, /SECRET-PROMPT|SECRET-ANSWER/);
   assert.match(lean, /1 human/);
 });
 
-test("oversized diagnostics drop the oldest detail entries, never events", () => {
+test("oversized diagnostics drop the oldest detail entries", () => {
   const report = buildClientReport(snapshot(logs(2000)), true, 40_000);
   assert.ok(report.length < 60_000);
   assert.match(report, /older omitted for size/);
   assert.match(report, /"at":1999/);
   assert.doesNotMatch(report, /"at":0,/);
-  assert.match(report, /study-request/);
   assert.match(buildClientReport(snapshot("{"), true), /could not be read/);
 });
 
@@ -162,6 +162,70 @@ test("saving writes one private file and copies only its path", async () => {
   );
   // Rendering saves nothing, and only the newest two reports are kept.
   assert.equal(readdirSync(directory).length, 2);
+});
+
+test("the AI call table reads today's usage rows and lists them by start time", async () => {
+  const scratch = mkdtempSync(join(tmpdir(), "bug-report-usage-rows-"));
+  const usageLog = join(scratch, "usage.jsonl");
+  const row = (over: object) =>
+    JSON.stringify({ outcome: "accepted", durationMs: 1000, ...over });
+  writeFileSync(
+    usageLog,
+    [
+      // The long assess call began first and ended last, so the log holds it last.
+      row({
+        at: "2026-11-23T07:59:20.000Z",
+        operation: "tutor",
+        mode: "terminal-review",
+        turn: 11,
+      }),
+      row({ at: "2026-11-23T07:59:15.000Z", operation: "assess" }),
+      row({
+        at: "2026-11-23T07:57:18.000Z",
+        operation: "tutor",
+        mode: "terminal-dialogue",
+        turn: 7,
+        part: 2,
+        ofParts: 3,
+      }),
+      row({ at: "2026-11-23T07:00:00.000Z", operation: "generate", parts: 3 }),
+      row({
+        at: "2026-11-23T06:00:00.000Z",
+        operation: "generate",
+        parts: null,
+      }),
+      row({
+        at: "2026-11-01T00:00:00.000Z",
+        operation: "tutor",
+        phase: "old-phase",
+        conversationTurn: 4,
+      }),
+    ].join("\n"),
+  );
+  await withRoute({ usageLog }, async (post) => {
+    const { markdown } = await (
+      await post({ mode: "render", description: "", client: "" })
+    ).json();
+    const rows = (markdown as string)
+      .split("\n")
+      .filter((line) => line.startsWith("| 2026"));
+    assert.deepEqual(
+      rows.map((line) => line.split(" | ").slice(0, 4).join(" | ")),
+      [
+        "| 2026-11-01T00:00:00.000Z | tutor | old-phase | 4",
+        "| 2026-11-23T06:00:00.000Z | generate |  | ",
+        "| 2026-11-23T07:00:00.000Z | generate | 3 parts | ",
+        "| 2026-11-23T07:57:18.000Z | tutor | terminal-dialogue | 7 (part 2/3)",
+        "| 2026-11-23T07:59:15.000Z | assess |  | ",
+        "| 2026-11-23T07:59:20.000Z | tutor | terminal-review | 11",
+      ],
+    );
+    assert.match(markdown, /Newest 6 of the usage log; 0 did not end accepted/);
+    assert.match(
+      markdown,
+      /say when each call started; rows are in that order/,
+    );
+  });
 });
 
 test("a usage log line that is valid JSON but not a row never fails the report", async () => {

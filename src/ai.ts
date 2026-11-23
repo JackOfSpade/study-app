@@ -201,8 +201,26 @@ const questionAsks = (problem: Problem) => {
   const last = blocks.length > 1 ? clip(blocks[blocks.length - 1]) : "";
   return last ? [last] : [];
 };
-/** The most recent questions already issued on any of this contract's
- * objectives, newest first, so a new one can change scenario and shape of ask.
+/** How a question is summarised for a later generation request. */
+const questionSummary = (problem: Problem) => ({
+  title: clip(problem.title, 120),
+  opening: clip(problem.staged?.shared ?? problem.prompt),
+  asks: questionAsks(problem),
+});
+/** The questions the learner already replaced on this one, as saved. A
+ * damaged entry is left out, never sent. */
+const discardedQuestions = (e: Encounter) =>
+  (Array.isArray(e.discardedQuestions) ? e.discardedQuestions : []).filter(
+    (x) =>
+      isRecord(x) &&
+      typeof x.title === "string" &&
+      typeof x.opening === "string" &&
+      Array.isArray(x.asks) &&
+      x.asks.every((ask) => typeof ask === "string"),
+  );
+/** The questions the learner replaced on this one, then the most recent
+ * questions already issued on any of this contract's objectives, newest
+ * first, so a new one can change scenario and shape of ask.
  * Question text only: never a learner answer or tutor message. Absent when
  * there are none, so a first question's request is unchanged. */
 export function earlierQuestions(
@@ -224,16 +242,14 @@ export function earlierQuestions(
       (a, b) =>
         (b.problemPresentedSequence ?? -1) - (a.problemPresentedSequence ?? -1),
     )
-    .slice(0, EARLIER_QUESTIONS);
-  return issued.length
-    ? {
-        earlierQuestions: issued.map((x) => ({
-          title: clip(x.problem!.title, 120),
-          opening: clip(x.problem!.staged?.shared ?? x.problem!.prompt),
-          asks: questionAsks(x.problem!),
-        })),
-      }
-    : {};
+    .map((x) => questionSummary(x.problem!));
+  // A regeneration names the question it replaces as `replaces`; the ones
+  // replaced before it are in no other encounter, so they lead this list.
+  const earlier = [...discardedQuestions(current), ...issued].slice(
+    0,
+    EARLIER_QUESTIONS,
+  );
+  return earlier.length ? { earlierQuestions: earlier } : {};
 }
 /** The request for one generated question. */
 function generationPayload(
@@ -460,6 +476,7 @@ export function regenerateQuestion(g: StudyRecord, e: Encounter, r: Roadmap) {
     prompt: e.problem!.prompt.slice(0, 1200),
     asks: questionAsks(e.problem!),
   };
+  const discarded = questionSummary(e.problem!);
   const key = encounterKey(e);
   const mine = (record: { encounter: string }) =>
     record.encounter === key || record.encounter === e.id;
@@ -501,6 +518,12 @@ export function regenerateQuestion(g: StudyRecord, e: Encounter, r: Roadmap) {
       replaces,
     }),
   };
+  // This request names the replaced question itself; the next regeneration
+  // has to be told about it too, or it can return to the same scenario.
+  e.discardedQuestions = [discarded, ...discardedQuestions(e)].slice(
+    0,
+    EARLIER_QUESTIONS,
+  );
   return true;
 }
 export function edit(

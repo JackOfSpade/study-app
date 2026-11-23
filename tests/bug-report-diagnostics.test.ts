@@ -31,7 +31,8 @@ test("damaged stored diagnostics never stop a report being built", () => {
   const report = buildClientReport(snapshot(damaged), true);
   assert.match(report, /Run run-good/);
   assert.match(report, /kept-entry/);
-  assert.match(report, /kept-event/);
+  // Runs written by earlier builds carried an audit block; it is not echoed.
+  assert.doesNotMatch(report, /kept-event|Lifecycle events|"audit"/);
   assert.match(report, /Run run-odd/);
   assert.match(report, /Run run-events/);
   assert.match(

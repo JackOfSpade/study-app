@@ -10,6 +10,7 @@ import {
   TERMINAL_DIALOGUE_INSTRUCTION,
 } from "../src/knowledge-probe";
 import type { Roadmap } from "../src/model";
+import { decode, encode, recover } from "../src/persistence";
 import { createRecord } from "./helpers/record";
 import {
   MINIMUM_EVIDENCE_GUIDANCE,
@@ -165,6 +166,63 @@ test("generate instructions require minimal concrete problems with unchanged con
     /prompt together with the part on screen, must stand on its own/,
   );
   assert.doesNotMatch(job.instructions, /establishes the most at once/);
+});
+
+test("the relay accepts a contract copy that keeps what the app checks, and names what differs", () => {
+  const contract = {
+    kind: "checkpoint",
+    id: "live-3-PY:T11.1/D1",
+    track: "PY",
+    objectiveIds: ["PY:T11.1"],
+    scopes: ["A long scope sentence the model may retype."],
+    depth: 1,
+    phase: "REPAIR_VERIFY",
+    review: false,
+    ledgerVersion: 3,
+    priorEvidence: ["A long evidence reference."],
+    preservedFacets: [],
+    missingFacets: ["a", "b"],
+    scheduleNote: "Synthetic note",
+  };
+  const job = { operation: "generate", payload: { contract } };
+  const reply = (copy: unknown) => ({
+    title: "Support ticket queue",
+    prompt: "Shared facts.",
+    starter: "",
+    rubric: ["Names the cost."],
+    contract: copy,
+    scopeDefinitions: [{ id: "s" }],
+  });
+  validateAnswer(job, reply(contract));
+  // The slips that cost a second generation on 2026-11-20: an optional key
+  // left out, a long string retyped, keys in another order.
+  const { missingFacets: _m, scheduleNote: _s, kind: _k, ...lean } = contract;
+  validateAnswer(job, reply(lean));
+  validateAnswer(job, reply({ ...contract, scopes: ["Retyped scope."] }));
+  validateAnswer(
+    job,
+    reply(Object.fromEntries(Object.entries(contract).reverse())),
+  );
+  // What the app refuses is still refused here, and the correction says where.
+  for (const [field, value] of [
+    ["track", "PE"],
+    ["depth", 2],
+    ["objectiveIds", ["PY:T11.2"]],
+    ["ledgerVersion", 4],
+    ["review", true],
+    ["kind", "transfer"],
+    ["phase", "LEARN"],
+  ] as const)
+    assert.throws(
+      () => validateAnswer(job, reply({ ...contract, [field]: value })),
+      new RegExp(`Copy the exact eligible contract.*\\(${field} differs`),
+      field,
+    );
+  assert.throws(
+    () => validateAnswer(job, reply(undefined)),
+    /contract differs/,
+  );
+  assert.throws(() => validateAnswer(job, reply("PY")), /contract differs/);
 });
 
 test("every generated question fits one sitting", () => {
@@ -400,6 +458,37 @@ test("regenerate carries the replaced question's asks and keeps it out of the hi
     // JSON round trip: the transport drops undefined optional fields.
     assert.deepEqual(sent[0], JSON.parse(JSON.stringify(payload)));
     assert.equal(e.pendingGeneration, undefined);
+    // A second regeneration is told about the first discarded question too,
+    // which no other question holds, and the record survives a reload.
+    const loaded: any = recover(decode(encode(g)));
+    const again = loaded.encounters["question-0"];
+    assert.equal(again.discardedQuestions[0].title, "Title question-0");
+    assert.equal(regenerateQuestion(loaded, again, r), true);
+    const next: any = again.pendingGeneration!.payload;
+    assert.equal(next.replaces.title, again.discardedQuestions[0].title);
+    assert.deepEqual(
+      next.earlierQuestions.map((x: any) => x.title),
+      ["Title question-0", "Title question-1"],
+    );
+    assert.deepEqual(next.earlierQuestions[0].asks, [
+      "First ask text",
+      "Second ask text",
+    ]);
+    assert.equal(again.discardedQuestions.length, 2);
+    // At most five are kept, and a damaged entry is never sent.
+    again.discardedQuestions = [
+      null,
+      ...Array(9).fill(again.discardedQuestions[1]),
+    ];
+    again.problem = structuredClone(loaded.encounters["question-1"].problem);
+    again.state = "in-progress";
+    assert.equal(regenerateQuestion(loaded, again, r), true);
+    assert.equal(again.discardedQuestions.length, 5);
+    assert.ok(
+      (again.pendingGeneration!.payload as any).earlierQuestions.every(
+        (x: any) => typeof x.title === "string",
+      ),
+    );
   } finally {
     globalThis.fetch = original;
     await checkBridge();

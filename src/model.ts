@@ -285,6 +285,10 @@ export interface Encounter {
   problemPresentedSequence?: number;
   /** Wall-clock time the problem was first presented; orders topic assessments. */
   problemPresentedAt?: number;
+  /** Short summaries of the questions the learner replaced here, newest
+   * first, so a later regeneration does not return to one of them. Question
+   * text only. */
+  discardedQuestions?: { title: string; opening: string; asks: string[] }[];
   pendingGeneration?: {
     /** Legacy saved generation requests were always ChatGPT handoffs. */
     provider?: Provider;
