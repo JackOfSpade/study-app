@@ -28,7 +28,11 @@ import {
   TERMINAL_REVIEW_FORMAT,
   TERMINAL_REVIEW_INSTRUCTION,
 } from "./knowledge-probe";
-import { bridgeRequest as request, status } from "./bridge-client";
+import {
+  bridgeRequest as request,
+  isInterruption,
+  status,
+} from "./bridge-client";
 import { isRecord } from "./records";
 export { checkBridge, status, type BridgeStatus } from "./bridge-client";
 import { browserSteps } from "../scripts/browser-runner/spec.mjs";
@@ -689,6 +693,7 @@ export function retryTutorRequest(
     profile = study.profile;
   job.state = "pending";
   delete job.error;
+  delete job.resume;
   const operation = (async () => {
     try {
       if (!interactiveConnected(g) || status().mode !== job.provider)
@@ -905,6 +910,11 @@ export function retryTutorRequest(
       if ((job.state as string) === "superseded") return;
       job.state = "interrupted";
       job.error = String(error);
+      // Cut off, or waiting only for its own connection to come back: sent
+      // again by itself. A reply that was refused waits for the learner.
+      job.resume =
+        isInterruption(error) ||
+        (job.provider === "claude-cli" && !interactiveConnected(g));
       studyEvent("tutor-reply-failed", {
         encounter: e.id,
         request: job.id,

@@ -1,5 +1,5 @@
 import { PROVIDERS } from "./model";
-import { bridgeRequest, status } from "./bridge-client";
+import { bridgeRequest, isInterruption, status } from "./bridge-client";
 import { evidencePacket, syncLearningView } from "./curriculum";
 import { applyLearningAssessment, encounterKey } from "./learner";
 import type { Assessment, Encounter, StudyRecord, Roadmap } from "./model";
@@ -78,6 +78,7 @@ async function runAssessment(
   };
   if (!prior) study.assessments.push(a);
   else a.status = "pending";
+  delete a.resume;
   const external = study.learner?.attempts.find(
     (v) =>
       v.encounter === encounterKey(e) && v.status === "externally-resolved",
@@ -134,6 +135,8 @@ async function runAssessment(
       a.status = "review-required";
       a.provenance =
         "Live assessment connection unavailable; work and request identity retained for retry.";
+      // Only the connection is missing: sent by itself once it is back.
+      a.resume = true;
       return;
     }
     const checkSnapshot = () => {
@@ -185,5 +188,8 @@ async function runAssessment(
   } catch (err) {
     a.status = "review-required";
     a.provenance = `Assessment unresolved: ${String(err)}`;
+    // A reload or a lost relay decided nothing; a refused reply waits for
+    // the learner's own retry.
+    a.resume = isInterruption(err);
   }
 }

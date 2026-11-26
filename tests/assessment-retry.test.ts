@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { assess, checkBridge, edit } from "../src/ai";
 import { eligible, evidencePacket, initialStudy } from "../src/curriculum";
+import { resumableAssessments } from "../src/resume-work";
 import type { Roadmap } from "../src/model";
 import { decode, encode, recover } from "../src/persistence";
 import { watchStudyEvents } from "../src/study-events";
@@ -318,6 +319,111 @@ test("long retained histories can capture their cutoff without overflowing the a
     await assess(g, e, r);
     assert.equal(g.study.assessments[0].evidenceCutoffSequence, 150_000);
     assert.equal(g.study.assessments[0].status, "review-required");
+  } finally {
+    await bridge.restore();
+  }
+});
+
+test("an assessment cut off by a lost relay is marked to be sent again, and a refused one is not", async () => {
+  const { g, e, r } = fixture();
+  let mode: "lost" | "refused" | "ok" = "lost";
+  const bridge = await connection(async () => {
+    if (mode === "lost") throw new TypeError("Failed to fetch");
+    if (mode === "refused")
+      return Response.json({ error: "Synthetic refusal" }, { status: 400 });
+    return unresolved();
+  });
+  try {
+    await assess(g, e, r);
+    const a = g.study.assessments[0];
+    assert.equal(a.status, "review-required");
+    assert.match(a.provenance, /relay was lost|Assessment unresolved/);
+    assert.equal(a.resume, true);
+    assert.deepEqual(
+      resumableAssessments(g).map((x) => x.assessment.id),
+      [a.id],
+    );
+    // The retry itself starts by forgetting the old verdict, then is refused.
+    mode = "refused";
+    await assess(g, e, r, a.evidenceCutoffSequence, true);
+    assert.equal(a.status, "review-required");
+    assert.equal(a.resume, false);
+    assert.deepEqual(resumableAssessments(g), []);
+    // Cut off again, then settled.
+    mode = "lost";
+    await assess(g, e, r, a.evidenceCutoffSequence, true);
+    assert.equal(a.resume, true);
+    mode = "ok";
+    await assess(g, e, r, a.evidenceCutoffSequence, true);
+    assert.equal(a.status, "applied");
+    assert.equal(a.resume, undefined);
+    assert.deepEqual(resumableAssessments(g), []);
+  } finally {
+    await bridge.restore();
+  }
+});
+
+test("an assessment waiting only for its connection is marked to be sent again and clears the mark when it starts", async () => {
+  const { g, e, r } = fixture(),
+    bodies: string[] = [];
+  const bridge = await connection(async (_url, init) => {
+    bodies.push(String(init?.body));
+    return unresolved();
+  });
+  try {
+    await bridge.disconnect();
+    await assess(g, e, r);
+    const a = g.study.assessments[0];
+    assert.equal(a.status, "review-required");
+    assert.equal(a.resume, true);
+    // It survives a reload and is still found.
+    const restored = recover(decode(encode(g)));
+    assert.deepEqual(
+      resumableAssessments(restored).map((x) => x.assessment.id),
+      [a.id],
+    );
+    await bridge.reconnect();
+    const found = resumableAssessments(restored)[0];
+    await assess(
+      restored,
+      found.encounter,
+      r,
+      found.assessment.evidenceCutoffSequence,
+      true,
+    );
+    assert.equal(bodies.length, 1);
+    assert.equal(restored.study.assessments[0].status, "applied");
+    assert.equal(restored.study.assessments[0].resume, undefined);
+  } finally {
+    await bridge.restore();
+  }
+});
+
+test("an assessment loading found pending, or an earlier build left unresolved by a lost fetch, is still resumable", async () => {
+  const { g, e, r } = fixture();
+  const bridge = await connection(async () => {
+    throw new TypeError("Failed to fetch");
+  });
+  try {
+    await assess(g, e, r);
+    const a = g.study.assessments[0];
+    // An earlier build wrote no resume mark.
+    delete a.resume;
+    a.provenance = "Assessment unresolved: TypeError: Failed to fetch";
+    assert.deepEqual(
+      resumableAssessments(g).map((x) => x.assessment.id),
+      [a.id],
+    );
+    a.status = "pending";
+    const restored = recover(decode(encode(g)));
+    assert.match(
+      restored.study.assessments[0].provenance,
+      /Application restarted during assessment/,
+    );
+    assert.deepEqual(
+      resumableAssessments(restored).map((x) => x.assessment.id),
+      [a.id],
+    );
   } finally {
     await bridge.restore();
   }

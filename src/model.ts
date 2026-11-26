@@ -138,6 +138,11 @@ export interface Assessment {
   findings: Finding[];
   status: "pending" | "review-required" | "applied";
   provenance: string;
+  /** Whether a review-required assessment was only cut off (true: the relay
+   * unreachable, the page closing) or refused (false). A cut-off one is sent
+   * again by itself (src/resume-work.ts). Absent on loading's own restart
+   * note and in earlier builds' saves, where the provenance tells. */
+  resume?: boolean;
   evidenceCutoffSequence?: number;
   visitOutcome?: "usable" | "unresolved" | "invalid";
   scopeReviews?: {
@@ -245,7 +250,11 @@ export interface TutorRequest {
   state: "pending" | "interrupted" | "applied" | "superseded";
   error?: string;
   responseMessageId?: string;
-  /** Resent once automatically when its question resumed after a restart. */
+  /** Whether an interrupted request was only cut off (true) or refused
+   * (false). A cut-off one is sent again by itself (src/resume-work.ts).
+   * Absent on loading's own restart note, which is read the same way. */
+  resume?: boolean;
+  /** Written by earlier builds, which resent a cut-off request only once. */
   resent?: boolean;
 }
 /** A question session the retired ChatGPT chat once ran. Saves still carry it,

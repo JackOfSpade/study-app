@@ -7,12 +7,15 @@ import {
   presentMessages,
   presentProblem,
   releaseRetiredChatRequests,
+  retryTutorRequest,
   seedGapPractice,
   send,
   status,
   watchStreamingReplies,
 } from "./ai";
 import { bridgeRequest } from "./bridge-client";
+import { assess } from "./learning-assessment";
+import { resumableAssessments, resumableTutorRequest } from "./resume-work";
 import { mountBugReport } from "./bug-report";
 import {
   activateCareerFocus,
@@ -156,7 +159,12 @@ try {
 }
 // Replies, completions, gradings and a failed fallback save copy are logged
 // as they settle, so a later report can be checked against the saved record.
-watchStudyEvents(logEvent);
+watchStudyEvents((type, data) => {
+  logEvent(type, data);
+  // A grading lands long after the reply that started it; save it at once so
+  // a reload or a crash cannot cost the answer.
+  if (type === "assessment-settled") void persist();
+});
 await checkBridge();
 app.innerHTML = studyShell;
 lessonSurface = createLessonSurface({
@@ -232,8 +240,67 @@ function displayedQuestion() {
     : (pendingQuestion() ??
         (lastQuestion ? studyRecord.encounters[lastQuestion] : undefined));
 }
+/**
+ * Send again, as the same saved requests, the work a reload or a lost relay
+ * cut off: a finished question's grading, the learner's last tutor message,
+ * a lesson and a lesson-chat message. Runs on load and whenever the relay
+ * can be reached again; each request joins one already running.
+ */
+function resumeInterruptedWork() {
+  if (saveRecoveryError || status().mode !== "claude-cli") return;
+  const g = studyRecord;
+  for (const { assessment, encounter } of resumableAssessments(g))
+    void assess(
+      g,
+      encounter,
+      roadmap,
+      assessment.evidenceCutoffSequence,
+      true,
+    ).finally(() => void persist());
+  for (const e of Object.values(g.encounters)) {
+    const job = resumableTutorRequest(e);
+    if (job) settleTerminalRequest(retryTutorRequest(g, e, job.id, roadmap), e);
+  }
+  lessons.resume(g, roadmap);
+  void persist();
+}
+/** Cut-off work found while the relay is already reachable: no reconnect
+ * will come to resend it, so it goes again after a growing pause, a few times
+ * at most until the next load, reconnect or return of the relay. */
+const RESUME_TRIES = 6;
+let resumeTimer: ReturnType<typeof setTimeout> | undefined;
+let resumeTries = 0;
+function hasResumableWork() {
+  return (
+    resumableAssessments(studyRecord).length > 0 ||
+    Object.values(studyRecord.encounters).some(
+      (e) => !!resumableTutorRequest(e),
+    ) ||
+    lessons.resumable(studyRecord)
+  );
+}
+function scheduleResume() {
+  if (
+    resumeTimer !== undefined ||
+    resumeTries >= RESUME_TRIES ||
+    saveRecoveryError ||
+    status().mode !== "claude-cli" ||
+    !hasResumableWork()
+  )
+    return;
+  resumeTimer = setTimeout(
+    () => {
+      resumeTimer = undefined;
+      resumeTries++;
+      void checkBridge().then(resumeInterruptedWork);
+    },
+    Math.min(2000 * 2 ** resumeTries, 60_000),
+  );
+}
 function resumeQuestions() {
   releaseRetiredChatRequests(studyRecord);
+  resumeTries = 0;
+  resumeInterruptedWork();
   const e = lastQuestion ? studyRecord.encounters[lastQuestion] : undefined;
   if (
     e &&
@@ -1032,7 +1099,14 @@ document.addEventListener("visibilitychange", () => {
   }
 });
 /** The periodic repaint: status lines, the skill map and the open question. */
+/** The relay's mode at the last repaint: work waits for it to come back. */
+let repaintedMode = status().mode;
 function ui() {
+  if (status().mode !== repaintedMode) {
+    repaintedMode = status().mode;
+    if (repaintedMode === "claude-cli") resumeQuestions();
+  }
+  scheduleResume();
   $("#log-status").textContent =
     runLogs.error ||
     "Logs stay on this browser: newest 3 records, at most 256 KB each. Older diagnostics are deleted automatically; learning is retained.";

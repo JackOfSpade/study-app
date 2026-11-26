@@ -64,20 +64,51 @@ export async function checkBridge() {
 }
 /** How long one request waits for the bridge to answer. */
 const REQUEST_TIMEOUT_MS = 30 * 60_000;
+/**
+ * The request never got its answer because the way to the relay was cut: the
+ * page was closing or reloading, the relay was restarting or unreachable, or
+ * the reply stream broke off. Nothing was decided about the request, so its
+ * owner keeps it and sends the same saved request again once the relay can be
+ * reached. A reply the relay or Claude refused is never one of these.
+ */
+export class BridgeInterrupted extends Error {
+  // Shown to the learner as "Error: …", like every other failed request.
+  readonly interrupted = true;
+  constructor(message = INTERRUPTED_MESSAGE) {
+    super(message);
+  }
+}
+export const INTERRUPTED_MESSAGE =
+  "The connection to the study relay was lost before the reply arrived. The saved request is sent again automatically once the relay is reachable.";
+/** Whether a failed request may be sent again unchanged without asking. */
+export const isInterruption = (error: unknown) =>
+  error instanceof BridgeInterrupted;
+/** True once the request's own wait budget or its owner ended it: a failure
+ * after that is that decision, never a cut line. */
+type Decided = () => boolean;
+const cutUnlessDecided = (decided: Decided, error: unknown) => {
+  if (decided()) return error;
+  return new BridgeInterrupted();
+};
 /** Bridge errors may come from a proxy as plain text; never surface a JSON
  * parse failure in place of the real reason. */
-async function readJson(r: Response) {
-  const text = await r.text();
+async function readJson(r: Response, decided: Decided) {
+  let text: string;
+  try {
+    text = await r.text();
+  } catch (error) {
+    // The body broke off while it was being read.
+    throw cutUnlessDecided(decided, error);
+  }
   let data: unknown;
   try {
     data = JSON.parse(text);
   } catch {
     if (r.ok) throw Error("Malformed bridge response");
     if (r.status >= 502 && r.status <= 504)
-      return {
-        error:
-          "The study bridge is not running. It is restarting; press Retry connection in a moment. Your work is saved.",
-      };
+      throw new BridgeInterrupted(
+        "The study bridge is not running. It is restarting; the saved request is sent again once it is back. Your work is saved.",
+      );
     return { error: text.trim().slice(0, 200) || `Bridge HTTP ${r.status}` };
   }
   if (!isRecord(data)) throw Error("Malformed bridge response");
@@ -105,18 +136,31 @@ function streamEvent(line: string, onText: (text: string) => void) {
   return undefined;
 }
 /** Each line is the text so far, then one final answer or error. */
-async function readStream(r: Response, onText: (text: string) => void) {
+async function readStream(
+  r: Response,
+  onText: (text: string) => void,
+  decided: Decided,
+) {
   if (!r.body) throw Error("Malformed bridge response");
   const reader = r.body.pipeThrough(new TextDecoderStream()).getReader();
   let buffer = "";
   try {
     for (;;) {
-      const { value, done } = await reader.read();
+      let chunk;
+      try {
+        chunk = await reader.read();
+      } catch (error) {
+        // The stream broke off: the page is closing or the relay went away.
+        throw cutUnlessDecided(decided, error);
+      }
+      const { value, done } = chunk;
       if (done) {
         // A final line may arrive without its newline.
         const answer = streamEvent(buffer, onText);
         if (answer) return answer;
-        throw Error("The reply ended before its answer arrived");
+        throw new BridgeInterrupted(
+          "The reply ended before its answer arrived. The saved request is sent again automatically.",
+        );
       }
       buffer += value;
       let at;
@@ -167,21 +211,39 @@ export async function bridgeRequest<T extends object = Record<string, unknown>>(
     provider,
     ...(provider === "claude-cli" && options?.onText ? { stream: true } : {}),
   });
-  const r = await fetch("/api/bridge", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body,
-    signal,
-  });
+  const decided = () => !!options?.signal?.aborted || timeout.aborted;
+  let r: Response;
+  try {
+    r = await fetch("/api/bridge", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+      signal,
+    });
+  } catch (error) {
+    // The owner's own cancel and the wait budget are decisions, not a cut line.
+    throw cutUnlessDecided(decided, error);
+  }
   if (
     options?.onText &&
     r.headers.get("Content-Type")?.includes("application/x-ndjson")
   )
-    return (await readStream(r, options.onText)) as T;
-  const data = await readJson(r);
-  if (!r.ok)
-    throw Error(
-      typeof data.error === "string" ? data.error : "Bridge request failed",
-    );
+    return (await readStream(r, options.onText, decided)) as T;
+  const data = await readJson(r, decided);
+  if (!r.ok) {
+    const message =
+      typeof data.error === "string" ? data.error : "Bridge request failed";
+    // The app server answers 502 itself, with no gateway code, while the
+    // relay restarts; the relay answers 499 for a call whose caller went
+    // away. A gateway failure also says 502 but names its code.
+    if (
+      r.status === 499 ||
+      (r.status === 502 &&
+        data.code === undefined &&
+        /^Study bridge unavailable/.test(message))
+    )
+      throw new BridgeInterrupted(message);
+    throw Error(message);
+  }
   return data as T;
 }

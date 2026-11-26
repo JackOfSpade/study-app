@@ -5,6 +5,7 @@
  */
 import {
   assess,
+  checkBridge,
   reconcileUploadedRoadmap,
   reviewEnvironmentObservation,
   status,
@@ -234,16 +235,20 @@ export function createInspector(host: InspectorHost) {
         if (!e || button.disabled) return;
         button.disabled = true;
         const requestRecord = host.studyRecord(),
-          pending = assess(
-            host.studyRecord(),
-            e,
-            roadmap,
-            a.evidenceCutoffSequence,
-            true,
-          );
-        // Persist the captured request before its response, so closing/reloading
-        // during a retry retains the same evidence and provider.
-        void host.persist();
+          // A stale status would fail the retry before it reached the relay.
+          pending = checkBridge().then(() => {
+            const review = assess(
+              requestRecord,
+              e,
+              roadmap,
+              a.evidenceCutoffSequence,
+              true,
+            );
+            // Persist the captured request before its response, so closing/reloading
+            // during a retry retains the same evidence and provider.
+            void host.persist();
+            return review;
+          });
         void pending.finally(() => {
           void host.persist();
           button.disabled = false;

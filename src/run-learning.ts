@@ -76,6 +76,7 @@ export function settleTutorRequest(
   state: "applied" | "superseded",
 ): void {
   job.state = state;
+  delete job.resume;
   releaseRequestContext(job, RELEASED_TUTOR_FIELDS);
 }
 

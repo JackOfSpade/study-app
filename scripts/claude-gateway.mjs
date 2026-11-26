@@ -672,6 +672,9 @@ function replaySampleSink(directory) {
   };
 }
 
+// A page reload drops its connection and resends the same request moments
+// later, so a call with a request id outlives its last caller this long.
+const ABANDONED_GRACE_MS = 90_000;
 const CONNECTION_CACHE_MS = 2000;
 // Well under the browser's 5 s status timeout, so a slow check never reads as a dead relay.
 const CONNECTION_TIMEOUT_MS = 3000;
@@ -682,6 +685,7 @@ export function createClaudeGateway({
   maxRunning = 3,
   validate = validateAnswer,
   now = Date.now,
+  abandonedGraceMs = ABANDONED_GRACE_MS,
   usageLog,
   usageLogMaxBytes = USAGE_LOG_MAX_BYTES,
   profileFor,
@@ -985,16 +989,38 @@ export function createClaudeGateway({
     if (key && finished.has(key))
       return Promise.resolve(finished.get(key).answer);
     const current = key && inFlight.get(key);
-    // A call every caller has left is already being stopped. A retry that
-    // arrives before its process exits starts afresh instead of joining it
-    // and inheriting a cancellation it never asked for.
+    // A call every caller has left is already being stopped (once its grace
+    // period, if any, has run out). A retry that arrives before its process
+    // exits starts afresh instead of joining it and inheriting a cancellation
+    // it never asked for.
     const entry =
       current && !current.cancel.signal.aborted
         ? current
-        : { cancel: new AbortController(), callers: 0 };
+        : {
+            cancel: new AbortController(),
+            callers: 0,
+            listeners: new Set(),
+            text: undefined,
+            timer: undefined,
+          };
     entry.callers++;
+    clearTimeout(entry.timer);
+    entry.timer = undefined;
+    const listeners = entry.listeners;
+    if (onText && !signal?.aborted) {
+      listeners.add(onText);
+      // A caller joining mid-stream sees what has been written so far.
+      if (entry.text !== undefined) onText(entry.text);
+    }
     const leave = () => {
-      if (--entry.callers === 0) entry.cancel.abort();
+      listeners.delete(onText);
+      if (--entry.callers !== 0) return;
+      if (!key || !(abandonedGraceMs > 0)) entry.cancel.abort();
+      else {
+        // A pending grace never keeps the process alive.
+        entry.timer = setTimeout(() => entry.cancel.abort(), abandonedGraceMs);
+        entry.timer.unref?.();
+      }
     };
     if (signal?.aborted) leave();
     else signal?.addEventListener("abort", leave, { once: true });
@@ -1003,11 +1029,17 @@ export function createClaudeGateway({
       operation,
       payload,
       entry.cancel.signal,
-      onText,
+      onText
+        ? (text) => {
+            entry.text = text;
+            for (const listener of [...listeners]) listener(text);
+          }
+        : undefined,
     ).then((answer) => {
       if (key) finished.set(key, { answer, at: now() });
       return answer;
     });
+    entry.promise.finally(() => clearTimeout(entry.timer)).catch(() => {});
     if (key) {
       inFlight.set(key, entry);
       entry.promise

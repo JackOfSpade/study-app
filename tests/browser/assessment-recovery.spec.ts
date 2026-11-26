@@ -5,6 +5,7 @@ test("retrying an assessment durably captures its pending request before a reply
   page,
 }) => {
   let hold = false;
+  let bridgeCalls = 0;
   let release!: () => void;
   const gate = new Promise<void>((resolve) => {
     release = resolve;
@@ -20,6 +21,7 @@ test("retrying an assessment durably captures its pending request before a reply
     }),
   );
   await page.route("**/api/bridge", async (route) => {
+    bridgeCalls++;
     if (hold) await gate;
     await route
       .fulfill({
@@ -70,13 +72,16 @@ test("retrying an assessment durably captures its pending request before a reply
     expect(JSON.parse(request!.payloadJson).packet.sourceHash).toMatch(
       /^[a-f0-9]{64}$/,
     );
-    // Reload interrupts the in-flight review while retaining its exact packet.
+    // Reload interrupts the in-flight review while retaining its exact packet;
+    // the relay is reachable, so the app sends that same request again by itself.
+    const before = bridgeCalls;
     await page.reload();
     await page.waitForFunction(() => !!(window as any).__studyApp);
+    await expect.poll(() => bridgeCalls).toBe(before + 1);
     const recovered = await page.evaluate(
       () => (window as any).__studyApp.record.study.assessments[0],
     );
-    expect(recovered.status).toBe("review-required");
+    expect(recovered.status).toBe("pending");
     expect(recovered.request).toEqual(request);
   } finally {
     release();

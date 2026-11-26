@@ -56,7 +56,7 @@ The save is one record holding the learning state, its questions and conversatio
 
 Saves written by earlier versions of the app carry extra fields. They load unchanged, the learning record is read from them as usual, and the extra fields are written back untouched. `tests/legacy-save.test.ts` with `tests/fixtures/legacy-save/` guards this.
 
-Interrupted requests keep their exact question and request identity. A lost acknowledgement retries safely, an unsent draft or interrupted question is never treated as learning, and an assessment captures its evidence before waiting for a connection.
+Interrupted requests keep their exact question and request identity, and a request a reload or a lost relay cut off is sent again by itself, unchanged, once the relay can be reached (see "Surviving a reload" in `docs/ARCHITECTURE.md`); a reply that was refused waits for your retry. A lost acknowledgement retries safely, an unsent draft or interrupted question is never treated as learning, and an assessment captures its evidence before waiting for a connection.
 
 ## Code execution
 

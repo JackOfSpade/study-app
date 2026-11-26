@@ -156,12 +156,31 @@ export function installStudySession(host: StudySessionHost) {
     }
   };
   $("#study-review-retry").onclick = async () => {
-    const studyRecord = host.studyRecord();
-    const a = workspaceAssessment(studyRecord);
-    const e = workspaceSelectedQuestion(studyRecord);
-    if (!a || !e) return;
-    await assess(studyRecord, e, roadmap, a.evidenceCutoffSequence, true);
-    questionChanged();
+    const button = $<HTMLButtonElement>("#study-review-retry");
+    if (button.disabled) return;
+    button.disabled = true;
+    try {
+      // The status read at load may be stale: a retry against it would fail
+      // at once as "connection unavailable" without reaching the relay.
+      await checkBridge();
+      const studyRecord = host.studyRecord();
+      const a = workspaceAssessment(studyRecord);
+      const e = workspaceSelectedQuestion(studyRecord);
+      if (!a || !e) return;
+      const pending = assess(
+        studyRecord,
+        e,
+        roadmap,
+        a.evidenceCutoffSequence,
+        true,
+      );
+      // The request is captured before its answer: a reload now resends it.
+      void save();
+      await pending;
+    } finally {
+      button.disabled = false;
+      questionChanged();
+    }
   };
   $("#study-regenerate").onclick = () => {
     const studyRecord = host.studyRecord();

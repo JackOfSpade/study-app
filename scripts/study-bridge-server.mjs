@@ -93,8 +93,17 @@ export function createStudyBridgeServer({ claude, control, reports } = {}) {
         try {
           const answer = await claude.run(parsed.operation, parsed.payload, {
             signal: cancel.signal,
-            ...(streaming ? { onText: (text) => line({ text }) } : {}),
+            ...(streaming
+              ? {
+                  onText: (text) => {
+                    if (!res.destroyed) line({ text });
+                  },
+                }
+              : {}),
           });
+          // A caller that left (a reload) is not waiting; the gateway keeps
+          // the answer for its resend.
+          if (res.destroyed) return;
           if (streaming) {
             line({ answer });
             res.end();

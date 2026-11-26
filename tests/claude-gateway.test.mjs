@@ -642,6 +642,7 @@ test("a joined call survives one caller leaving and stops when all have", async 
     env,
     cwd: dir,
     validate: () => {},
+    abandonedGraceMs: 0,
     spawn: (...args) => (child = base(...args)),
   });
   const a = new AbortController();
@@ -686,7 +687,13 @@ test("a retry of a request whose every caller left starts afresh instead of inhe
       });
     return child;
   };
-  const g = createClaudeGateway({ env, cwd: dir, validate: () => {}, spawn });
+  const g = createClaudeGateway({
+    env,
+    cwd: dir,
+    validate: () => {},
+    spawn,
+    abandonedGraceMs: 0,
+  });
   const payload = { requestId: "reloaded" };
   const left = new AbortController();
   const first = g.run("review-environment", payload, { signal: left.signal });
@@ -700,6 +707,154 @@ test("a retry of a request whose every caller left starts afresh instead of inhe
   // The stopped call's cleanup left the finished answer reachable by its id.
   assert.deepEqual(await g.run("review-environment", payload), { ok: 2 });
   assert.equal(children.length, 2);
+});
+
+const tick = (ms = 0) => new Promise((r) => setTimeout(r, ms));
+/** A process the test finishes or streams into by hand. */
+function manualSpawn() {
+  const children = [];
+  const spawn = (binary, args) => {
+    const child = new EventEmitter();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    child.stdin = new PassThrough();
+    child.kill = () => {
+      if (child.killed) return;
+      child.killed = true;
+      child.emit("close", null);
+    };
+    child.write = (event) => child.stdout.write(`${JSON.stringify(event)}\n`);
+    const model = args[args.indexOf("--model") + 1];
+    child.init = () =>
+      child.write({
+        type: "system",
+        subtype: "init",
+        model: `claude-${model}-5-5`,
+      });
+    child.delta = (text) =>
+      child.write({
+        type: "stream_event",
+        event: { delta: { type: "text_delta", text } },
+      });
+    child.finish = (result) => {
+      child.write({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        result,
+      });
+      child.stdout.end();
+      child.emit("close", 0);
+    };
+    children.push(child);
+    return child;
+  };
+  return { spawn, children };
+}
+
+test("a caller leaving does not stop a call a reload rejoins within the grace period", async () => {
+  const { spawn, children } = manualSpawn();
+  const g = createClaudeGateway({
+    env,
+    cwd: dir,
+    validate: () => {},
+    spawn,
+    abandonedGraceMs: 200,
+  });
+  const payload = { requestId: "reload" };
+  const left = new AbortController();
+  g.run("review-environment", payload, { signal: left.signal }).catch(() => {});
+  await tick();
+  left.abort();
+  await tick(20);
+  assert.ok(!children[0].killed, "still running inside the grace period");
+  const rejoined = g.run("review-environment", payload);
+  await tick(250);
+  assert.ok(!children[0].killed, "the rejoin cancelled the pending stop");
+  children[0].init();
+  children[0].finish('{"ok":1}');
+  assert.deepEqual(await rejoined, { ok: 1 });
+  assert.equal(children.length, 1);
+});
+
+test("a call nobody rejoins is stopped after the grace period and logged cancelled", async () => {
+  const { spawn, children } = manualSpawn();
+  const rows = [];
+  const g = createClaudeGateway({
+    env,
+    cwd: dir,
+    validate: () => {},
+    spawn,
+    abandonedGraceMs: 60,
+    usageLog: (row) => rows.push(row),
+  });
+  const left = new AbortController();
+  const running = g.run(
+    "review-environment",
+    { requestId: "gone" },
+    { signal: left.signal },
+  );
+  await tick();
+  left.abort();
+  await tick(20);
+  assert.ok(!children[0].killed);
+  await assert.rejects(running, { code: "CLAUDE_CANCELLED" });
+  assert.ok(children[0].killed);
+  assert.ok(
+    rows.some((row) => /cancel/i.test(JSON.stringify(row))),
+    JSON.stringify(rows),
+  );
+});
+
+test("a caller joining a streaming call gets the latest text now and the rest later", async () => {
+  const { spawn, children } = manualSpawn();
+  const g = createClaudeGateway({
+    env,
+    cwd: dir,
+    validate: () => {},
+    spawn,
+    abandonedGraceMs: 200,
+  });
+  const payload = { requestId: "stream" };
+  const first = [];
+  const second = [];
+  const left = new AbortController();
+  g.run("tutor", payload, {
+    signal: left.signal,
+    onText: (t) => first.push(t),
+  }).catch(() => {});
+  await tick();
+  children[0].init();
+  children[0].delta('{"text":"Hel');
+  await tick();
+  assert.deepEqual(first, ["Hel"]);
+  left.abort();
+  const joined = g.run("tutor", payload, { onText: (t) => second.push(t) });
+  assert.deepEqual(second, ["Hel"], "replayed at once");
+  children[0].delta('lo","complete":false}');
+  await tick();
+  children[0].finish('{"text":"Hello","complete":false}');
+  assert.equal((await joined).text, "Hello");
+  assert.deepEqual(second, ["Hel", "Hello"]);
+  assert.deepEqual(first, ["Hel"], "a caller that left hears nothing more");
+  assert.equal(children.length, 1);
+});
+
+test("a call without a request id is stopped at once when its caller leaves", async () => {
+  const { spawn, children } = manualSpawn();
+  const g = createClaudeGateway({
+    env,
+    cwd: dir,
+    validate: () => {},
+    spawn,
+    abandonedGraceMs: 60_000,
+  });
+  const left = new AbortController();
+  const running = g.run("review-environment", {}, { signal: left.signal });
+  await tick();
+  left.abort();
+  await assert.rejects(running, { code: "CLAUDE_CANCELLED" });
+  assert.ok(children[0].killed);
 });
 
 test("the reply's text can be read as it is written", () => {

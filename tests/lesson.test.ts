@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import type { bridgeRequest } from "../src/bridge-client";
+import { BridgeInterrupted, type bridgeRequest } from "../src/bridge-client";
 import { eligible, initialStudy } from "../src/curriculum";
 import type { KnowledgeGapRecord } from "../src/knowledge-probe";
 import {
@@ -908,4 +908,163 @@ test("an onChange that throws does not cost the learner the lesson", async () =>
   });
   await lessons.generate(g, r, gap);
   assert.equal(lessons.record(gap.id)!.state, "ready");
+});
+
+const idle = async () => {
+  for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 0));
+};
+
+test("a lesson whose request was cut off becomes interrupted, and resume sends it again under the same request id", async () => {
+  const { g, contract } = fixture();
+  const gap = gapOf(g, contract);
+  g.study.knowledgeGaps = [gap];
+  let cut = true;
+  const h = harness((c) => {
+    if (cut) throw new BridgeInterrupted();
+    return good()(c);
+  });
+  await h.lessons.generate(g, r, gap);
+  const rec = h.lessons.record(gap.id)!;
+  assert.equal(rec.state, "interrupted");
+  assert.match(rec.error!, /requested again automatically/);
+  assert.equal(saved(h.mem, gap.id).state, "interrupted");
+  assert.equal(h.calls.length, 1);
+  cut = false;
+  h.lessons.resume(g, r);
+  await idle();
+  assert.equal(h.calls.length, 2);
+  assert.equal(h.calls[1].payload.requestId, h.calls[0].payload.requestId);
+  assert.equal(rec.state, "ready");
+  // Nothing is left to send.
+  h.lessons.resume(g, r);
+  await idle();
+  assert.equal(h.calls.length, 2);
+});
+
+test("a lesson loaded as interrupted is resumed, and one the relay refused stays failed and is not sent", async () => {
+  const { g, contract } = fixture();
+  const gap = gapOf(g, contract);
+  g.study.knowledgeGaps = [gap];
+  const h = harness(() => {
+    throw Error("Usage limit reached");
+  });
+  await h.lessons.generate(g, r, gap);
+  const rec = h.lessons.record(gap.id)!;
+  assert.equal(rec.state, "failed");
+  assert.match(rec.error!, /Usage limit reached/);
+  h.lessons.resume(g, r);
+  await idle();
+  assert.equal(h.calls.length, 1);
+  assert.equal(rec.state, "failed");
+  // A lesson that was cut off with the page is resumed after loading.
+  const h2 = harness(good());
+  await h2.mem.store.put({
+    key: gap.id,
+    state: "pending",
+    requestId: "lesson-lost-2",
+    attempt: 1,
+    createdAt: "2026-11-19T09:00:00.000Z",
+    responses: {},
+    chat: [],
+    chatSeq: 0,
+  });
+  await h2.lessons.load();
+  h2.lessons.resume(g, r);
+  await idle();
+  assert.equal(h2.calls.length, 1);
+  assert.equal(h2.calls[0].payload.requestId, "lesson-lost-2");
+  assert.equal(h2.lessons.record(gap.id)!.state, "ready");
+});
+
+test("an interrupted lesson whose gap is no longer in the record is not sent", async () => {
+  const { g, contract } = fixture();
+  const gap = gapOf(g, contract);
+  const h = harness(() => {
+    throw new BridgeInterrupted();
+  });
+  await h.lessons.generate(g, r, gap);
+  assert.equal(h.lessons.record(gap.id)!.state, "interrupted");
+  // The gap is not in the record: nothing to rebuild the request from.
+  g.study.knowledgeGaps = [];
+  h.lessons.resume(g, r);
+  await idle();
+  assert.equal(h.calls.length, 1);
+  g.study.knowledgeGaps = undefined;
+  h.lessons.resume(g, r);
+  await idle();
+  assert.equal(h.calls.length, 1);
+});
+
+test("a chat message cut off is retried by resume, a refused one is not", async () => {
+  let mode: "cut" | "refused" | "ok" = "cut";
+  const { h, key, rec, gap } = await readyLesson((c) => {
+    if (mode === "cut") throw new BridgeInterrupted();
+    if (mode === "refused") throw Error("Usage limit reached");
+    return { requestId: c.payload.requestId, text: "Now it works." };
+  });
+  const { g } = fixture();
+  g.study.knowledgeGaps = [gap];
+  await h.lessons.send(key, "Please explain");
+  assert.equal(rec.chat[0].state, "failed");
+  assert.match(rec.chat[0].error!, /sent again automatically/);
+  mode = "ok";
+  h.lessons.resume(g, r);
+  await idle();
+  const [first, second] = chatCalls(h);
+  assert.equal(chatCalls(h).length, 2);
+  // The same request again, so the relay can join the call still running.
+  assert.equal(first.payload.requestId, second.payload.requestId);
+  assert.deepEqual(second.payload, first.payload);
+  assert.deepEqual(
+    rec.chat.map((m) => [m.role, m.state]),
+    [
+      ["learner", "sent"],
+      ["tutor", "sent"],
+    ],
+  );
+  assert.equal(rec.state, "ready");
+
+  // A refused reply keeps its explicit retry button.
+  mode = "refused";
+  await h.lessons.send(key, "Another question");
+  const last = rec.chat.at(-1)!;
+  assert.equal(last.state, "failed");
+  assert.match(last.error!, /Usage limit reached/);
+  const before = chatCalls(h).length;
+  mode = "ok";
+  h.lessons.resume(g, r);
+  await idle();
+  assert.equal(chatCalls(h).length, before);
+  assert.equal(rec.chat.at(-1)!.state, "failed");
+});
+
+test("a chat that was waiting when the page closed is retried by resume after loading", async () => {
+  const { h, key, gap } = await readyLesson((c) => ({
+    requestId: c.payload.requestId,
+    text: "ok",
+  }));
+  const stored = saved(h.mem, key);
+  stored.chat.push({
+    id: "m-x",
+    role: "learner",
+    text: "unanswered",
+    at: "2026-11-19T12:00:00.000Z",
+    state: "pending",
+  });
+  h.mem.rows.set(key, JSON.stringify(stored));
+  const again = harness((c) => ({
+    requestId: c.payload.requestId,
+    text: "ok",
+  }));
+  for (const [k, v] of h.mem.rows) again.mem.rows.set(k, v);
+  await again.lessons.load();
+  const rec = again.lessons.record(key)!;
+  assert.equal(rec.chat[0].state, "failed");
+  const { g } = fixture();
+  g.study.knowledgeGaps = [gap];
+  again.lessons.resume(g, r);
+  await idle();
+  assert.equal(chatCalls(again).length, 1);
+  assert.equal(chatCalls(again)[0].payload.message, "unanswered");
+  assert.equal(rec.chat[0].state, "sent");
 });

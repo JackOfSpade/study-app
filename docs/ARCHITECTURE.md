@@ -73,4 +73,14 @@ Human editor evidence stores revision snapshots and the inserted and removed tex
 
 Question keys combine a run identity with the question id. Pending assessments retry with their original evidence cutoff, and interrupted live requests never substitute other completions.
 
+### Surviving a reload
+
+A reload, a closed tab or a relay restart may land at any moment, so no request depends on the page staying open:
+
+- `bridge-client.ts` tells a cut line from a decision. A request whose fetch fails, whose reply body or stream breaks off or ends without an answer, or that gets the app server's own 502 ("Study bridge unavailable", no gateway `code`), a plain-text 502-504 or a 499 fails with `BridgeInterrupted`. A gateway failure (502 with a `code`), any other HTTP error, the owner's own abort and the 30-minute wait budget are not interruptions.
+- Cut-off work is marked, not refused: an assessment and a tutor request carry `resume: true` (false when the reply was refused); a lesson becomes `interrupted`; a lesson-chat message keeps a cut-off note. Work the loader closed (`persistence.ts` `recover`) and earlier builds' saves carry no flag and are recognised by the note loading wrote (`resume-work.ts`). Loading itself adds no field, so a legacy save loads byte for byte as before.
+- `main.ts` `resumeInterruptedWork` sends that work again as the same saved request: on load, on `online`, on Reconnect and whenever the relay status turns connected. Work cut off while the relay stays reachable is resent after 2 s, doubling to at most 60 s, up to six times until the next of those events. A refused request keeps its explicit retry button and is never resent by itself. Question generation already resumes from `pendingGeneration`.
+- The same request id and payload let the relay join the call still running (`claude-gateway.mjs` `run`): a call with a request id outlives its last caller by 90 s (`abandonedGraceMs`), and its streamed text reaches every caller that joins. A finished answer is kept for 10 minutes. So a reload neither repeats nor pays twice for a call, and a closed tab's call is stopped 90 s after it closed; its `cancelled` usage row is written then.
+- The record is saved as soon as an assessment settles (`assessment-settled`), not at the next blur or page hide.
+
 The roadmap export transaction is complete. Importing a roadmap edited elsewhere goes through review and reconciliation (above); a JSON backup resumes the full ledger and raw artifacts.
