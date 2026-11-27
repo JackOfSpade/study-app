@@ -26,7 +26,7 @@ import { presentRoadmapReview } from "../src/roadmap-exposure";
 import { createRecord } from "./helpers/record";
 const r: Roadmap = JSON.parse(readFileSync("public/curriculum.json", "utf8"));
 function fixture() {
-  const g = createRecord(7, r);
+  const g = createRecord(r);
   g.study.profile = "live";
   return { g, l: g.study.learner! };
 }

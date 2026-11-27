@@ -194,7 +194,7 @@ test("the real reconcileRoadmap reaches ready for every adopt case from an edits
       `${item.id} candidate is not a fully recorded revision 10`,
     );
     const roadmap = loadRoadmap(),
-      g = createRecord(7, roadmap);
+      g = createRecord(roadmap);
     g.study.profile = "live";
     let edits: { find: string; replace: string }[] = [];
     await reconcileRoadmap(
@@ -338,7 +338,7 @@ const PROGRESS_IDS = [
 /** A fresh live record, as the reference adoption test uses. */
 function liveRecord() {
   const roadmap = loadRoadmap(),
-    g = createRecord(7, roadmap);
+    g = createRecord(roadmap);
   g.study.profile = "live";
   return { roadmap, g };
 }

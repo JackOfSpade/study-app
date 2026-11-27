@@ -26,7 +26,7 @@ import { createRecord } from "./helpers/record";
 const r: Roadmap = JSON.parse(readFileSync("public/curriculum.json", "utf8")),
   at = "2026-10-16T16:00:00Z";
 function fixture(source = r) {
-  const g = createRecord(7, source),
+  const g = createRecord(source),
     l = g.study.learner!;
   g.study.profile = "live";
   let n = 0;

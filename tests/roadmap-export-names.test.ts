@@ -81,7 +81,7 @@ const addedLines = (raw: string) => {
 };
 
 function studied() {
-  const g = createRecord(7, r);
+  const g = createRecord(r);
   g.study.profile = "live";
   const l = g.study.learner!;
   let n = 0;
@@ -303,7 +303,7 @@ test("an export built on a legacy parent has one study 0.12 section, keeps paren
 
 /** An open current attempt that another device assessed and exported. */
 async function currentAttemptSource(legacy: boolean) {
-  const g = createRecord(7, r),
+  const g = createRecord(r),
     l = g.study.learner!,
     e = g.encounters["question-0"];
   g.study.profile = "live";

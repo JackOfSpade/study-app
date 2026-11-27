@@ -29,7 +29,7 @@ const r: Roadmap = JSON.parse(readFileSync("public/curriculum.json", "utf8"));
 const at = "2026-10-16T16:00:00Z";
 
 test("reviewed lower-pass correction suspends a real issued higher task and preserves exact draft through reload", async () => {
-  const g = createRecord(77, r);
+  const g = createRecord(r);
   g.study.profile = "live";
   const l = g.study.learner!;
   const base = g.encounters["question-0"];

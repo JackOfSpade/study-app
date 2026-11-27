@@ -39,7 +39,7 @@ test("a reply, a failed reply and a completion are each reported without the lea
         : respond();
     try {
       await checkBridge();
-      const g = createRecord(717, r);
+      const g = createRecord(r);
       preparePracticeRooms(g, r);
       const e = g.encounters["question-0"];
       e.mode = "solo";
@@ -108,7 +108,7 @@ test("a save that no longer fits the fallback copy is reported once, and again w
         },
       },
     });
-    const g = createRecord(729, r);
+    const g = createRecord(r);
     // The fallback copy refuses the save; IndexedDB is down too, so the save
     // itself fails, which is the caller's to report.
     await assert.rejects(save(g));

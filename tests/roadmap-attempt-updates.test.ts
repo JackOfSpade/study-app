@@ -17,7 +17,7 @@ const oldRow = r.raw.split("\n").find((s) => s.startsWith("| S0004-A13 |"))!;
 const observation =
   "| S0004-EV99 | S0004-A13 | 2026-10-16 | T02.1 | D1 synthetic assisted metric definition | GUIDED | HINT | 1 | Synthetic external continuation; the learner used a supplied metric hint. No independent pass or actual runtime execution. |";
 function fixture() {
-  const g = createRecord(7, r);
+  const g = createRecord(r);
   g.study.profile = "live";
   return g;
 }

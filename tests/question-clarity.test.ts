@@ -50,7 +50,7 @@ test("a clarification-only terminal turn receives the clarity policy and preserv
   };
   try {
     await checkBridge();
-    const g = createRecord(20261020, roadmap);
+    const g = createRecord(roadmap);
     const e = g.encounters["question-0"];
     e.mode = "solo";
     e.owner = "human";

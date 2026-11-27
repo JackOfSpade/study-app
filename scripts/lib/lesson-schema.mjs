@@ -414,7 +414,7 @@ function section(raw, index, dropped, seen) {
   rawBlocks.forEach((rawBlock, at) => {
     const kind = plain(rawBlock) ? own(rawBlock, "kind") : undefined;
     const note = (reason) =>
-      dropped.push(`${id}/${at}:${kindLabel(kind)}: ${reason}`);
+      dropped.push(`${lessonBlockKey(id, at)}:${kindLabel(kind)}: ${reason}`);
     if (typeof kind !== "string" || !Object.hasOwn(BLOCKS, kind))
       return note(plain(rawBlock) ? "unknown block kind" : "not a block");
     try {

@@ -35,7 +35,7 @@ export function recordTargetReview(g: StudyRecord, at: string) {
   throw Error("Fixture never scheduled the target review");
 }
 export function retentionFixture(count = 2) {
-  const g = createRecord(73, r);
+  const g = createRecord(r);
   g.study.profile = "live";
   const times = [
     "2026-10-17T16:00:00Z",

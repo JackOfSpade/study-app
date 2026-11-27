@@ -79,7 +79,7 @@ export async function setup(
   priorIndependent = false,
   initialStatus?: string,
 ) {
-  const g = createRecord(7, r);
+  const g = createRecord(r);
   g.study.profile = "live";
   let raw = revision(r.raw, r.sourceHash, 10),
     at = raw.indexOf(

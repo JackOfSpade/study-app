@@ -73,7 +73,7 @@ test("Claude CLI roadmap review survives reload with exact files and provider, t
         ),
         { save } = await import(root + "persistence.ts");
       const r = await (await fetch("/curriculum.json")).json(),
-        g = createRecord(7, r);
+        g = createRecord(r);
       g.study.profile = "live";
       Object.assign((window as any).__studyApp.record, g);
       await save((window as any).__studyApp.record);

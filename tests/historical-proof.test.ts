@@ -22,7 +22,7 @@ const r: Roadmap = JSON.parse(readFileSync("public/curriculum.json", "utf8"));
 const at = "2026-10-16T16:00:00.000Z";
 function fixture(id = "PY:T07.1", mode: "test" | "live" = "test") {
   const l = initialLearner(r, mode),
-    g = createRecord(7, r);
+    g = createRecord(r);
   const track = id.startsWith("PY:") ? "PY" : "PE",
     topic = id.split(":")[1].split(".")[0];
   const priorReview = l.reviews[`${id}/D1`];

@@ -34,7 +34,7 @@ import {
 const r: Roadmap = JSON.parse(readFileSync("public/curriculum.json", "utf8"));
 
 test("entering the study workspace marks it enabled once and keeps what the save held", () => {
-  const g = createRecord(121, r);
+  const g = createRecord(r);
   g.studyWorkspace = { enabled: false, encounter: "question-0" };
   enterStudyWorkspace(g);
   assert.deepEqual(g.studyWorkspace, {
@@ -47,7 +47,7 @@ test("entering the study workspace marks it enabled once and keeps what the save
 });
 
 test("standalone questions use the formal scheduler and complete once", async () => {
-  const g = createRecord(122, r);
+  const g = createRecord(r);
   preparePracticeRooms(g, r);
   const contract = eligible(r, g.study);
   enterStudyWorkspace(g);
@@ -73,7 +73,7 @@ test("standalone questions use the formal scheduler and complete once", async ()
 });
 
 test("workspace reuses an issued question and ignores work owned by someone else", () => {
-  const g = createRecord(123, r);
+  const g = createRecord(r);
   preparePracticeRooms(g, r);
   const foreign = Object.values(g.encounters)[0];
   foreign.owner = "someone-else";
@@ -102,7 +102,7 @@ test("workspace reuses an issued question and ignores work owned by someone else
 });
 
 test("workspace keeps the selected human question when other displayed tasks precede it", () => {
-  const g = createRecord(127, r);
+  const g = createRecord(r);
   preparePracticeRooms(g, r);
   enterStudyWorkspace(g);
   const [earlier, selected] = Object.values(g.encounters);
@@ -115,7 +115,7 @@ test("workspace keeps the selected human question when other displayed tasks pre
 });
 
 test("consumed generation and displayed work owned by someone else cannot block a new study question", () => {
-  const g = createRecord(128, r);
+  const g = createRecord(r);
   preparePracticeRooms(g, r);
   enterStudyWorkspace(g);
   const consumed = nextWorkspaceQuestion(g, r);
@@ -165,7 +165,7 @@ test("live study-only generation receives the exact formal contract", async () =
   };
   try {
     await checkBridge();
-    const g = createRecord(126, r, initialStudy(r, "live"));
+    const g = createRecord(r, initialStudy(r, "live"));
     enterStudyWorkspace(g);
     const formal = eligible(r, g.study);
     const e = nextWorkspaceQuestion(g, r);
@@ -183,7 +183,7 @@ test("live study-only generation receives the exact formal contract", async () =
 });
 
 test("next live question waits for its source-bound progress review, while unrelated historical reviews do not block it", () => {
-  const g = createRecord(124, r, initialStudy(r, "live"));
+  const g = createRecord(r, initialStudy(r, "live"));
   enterStudyWorkspace(g);
   const e = nextWorkspaceQuestion(g, r);
   e.state = "consumed";
@@ -213,7 +213,7 @@ test("next live question waits for its source-bound progress review, while unrel
 });
 
 test("workspace reviews stay bound to their record when question IDs are reused", () => {
-  const g = createRecord(129, r, initialStudy(r, "live"));
+  const g = createRecord(r, initialStudy(r, "live"));
   enterStudyWorkspace(g);
   const current = nextWorkspaceQuestion(g, r);
   current.state = "consumed";
@@ -244,7 +244,7 @@ test("workspace reviews stay bound to their record when question IDs are reused"
 });
 
 test("a completed unresolved visit becomes a linked continuation without blocking the owed track", () => {
-  const g = createRecord(131, r, initialStudy(r, "live"));
+  const g = createRecord(r, initialStudy(r, "live"));
   g.study.learner!.reviews = {};
   g.study.learner!.studyTurnPosition = 0;
   enterStudyWorkspace(g);
@@ -342,7 +342,7 @@ test("a completed unresolved visit becomes a linked continuation without blockin
 });
 
 test("skill map stays stable across an unissued question and escapes learner-facing content", () => {
-  const g = createRecord(125, r);
+  const g = createRecord(r);
   preparePracticeRooms(g, r);
   const before = workspaceProgressHtml(g, r);
   enterStudyWorkspace(g);
@@ -359,7 +359,7 @@ test("skill map stays stable across an unissued question and escapes learner-fac
 });
 
 test("regenerating a workspace question keeps its topic and leaves progress untouched", () => {
-  const g = createRecord(124, r);
+  const g = createRecord(r);
   g.study.learner ??= initialLearner(r);
   const contract = eligible(r, g.study);
   enterStudyWorkspace(g);

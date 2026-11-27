@@ -12,16 +12,17 @@ import {
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { createClaudeGateway, taskProfile } from "./claude-gateway.mjs";
+import {
+  createClaudeGateway,
+  failureOutcome,
+  sumKnown,
+  taskProfile,
+} from "./claude-gateway.mjs";
 import { privateDirectory } from "./lib/private-fs.mjs";
 
 const MODELS = ["haiku", "sonnet", "opus"];
 const EFFORTS = ["low", "medium", "high", "xhigh"];
 const isNumber = (value) => typeof value === "number" && Number.isFinite(value);
-const sumKnown = (values) => {
-  const known = values.filter(isNumber);
-  return known.length ? known.reduce((total, value) => total + value, 0) : null;
-};
 const resumeKey = (row) => `${row.caseId}\u0000${row.setting}\u0000${row.rep}`;
 
 /** `model:effort`, refusing anything production never offers (e.g. `max`). */
@@ -172,15 +173,10 @@ export function readLadderRows(out) {
     });
 }
 
-const outcomeOf = (error) => {
-  if (error?.code === "CLAUDE_INVALID_ANSWER") return "invalid";
-  return (
-    String(error?.code ?? "")
-      .replace(/^CLAUDE_/, "")
-      .toLowerCase()
-      .replace(/_/g, "-") || "error"
-  );
-};
+/** The gateway's own failure label (a killed timer reads as timeout), but a
+ * rejected answer is "invalid" as in the replay samples. */
+const outcomeOf = (error) =>
+  error?.code === "CLAUDE_INVALID_ANSWER" ? "invalid" : failureOutcome(error);
 
 /** Runs every case under every setting, one fresh gateway per arm, appending
  * each row at once so an interrupted run resumes where it stopped. */

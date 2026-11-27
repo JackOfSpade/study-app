@@ -34,7 +34,7 @@ async function fixture(
   };
   try {
     await checkBridge();
-    const g = createRecord(717, r);
+    const g = createRecord(r);
     preparePracticeRooms(g, r);
     const e = g.encounters["question-0"];
     e.mode = "solo";
@@ -125,7 +125,7 @@ test("settled tutor jobs stay small however long the conversation grows", async 
   }));
 
 test("a save from before this release shrinks on load, and the retired chat's session keeps its question", () => {
-  const g = createRecord(717, r);
+  const g = createRecord(r);
   const e = Object.values(g.encounters)[0];
   const full = {
     requestId: "old-job",
@@ -183,7 +183,7 @@ test("a save from before this release shrinks on load, and the retired chat's se
 });
 
 test("a settled job keeps only what identifies its topic-assessment context", () => {
-  const g = createRecord(717, r);
+  const g = createRecord(r);
   const e = Object.values(g.encounters)[0];
   const context = {
     topicIds: ["PY:T05"],
@@ -272,7 +272,7 @@ test("recovering an archived question releases context from every tutor job, inc
   }));
 
 test("recover migrates existing saves: settled live jobs and all archived jobs shrink", () => {
-  const g = createRecord(717, r);
+  const g = createRecord(r);
   const ids = Object.keys(g.encounters);
   const e = g.encounters[ids[0]];
   const other = g.encounters[ids[1]];

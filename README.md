@@ -60,7 +60,7 @@ Interrupted requests keep their exact question and request identity, and a reque
 
 ## Code execution
 
-Questions at depth 2 or above can carry a runtime (Python, TypeScript or JavaScript, or an isolated React environment). Execution is optional and needs Docker. Install the ordinary images explicitly:
+Questions at depth 2 or above can carry a runtime (Python or TypeScript, or an isolated React environment; the code runner also accepts plain JavaScript, which questions do not use). Execution is optional and needs Docker. Install the ordinary images explicitly:
 
 ```sh
 docker pull python:3.12-alpine

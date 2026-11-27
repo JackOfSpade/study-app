@@ -98,7 +98,7 @@ export function gradeScheduled(
 export async function laterBaselineFixture(
   outcome: "independent" | "contradicted" | "assisted",
 ) {
-  const g = createRecord(73, r);
+  const g = createRecord(r);
   g.study.profile = "live";
   const { e, c } = gradeScheduled(g, outcome, laterAt, 0);
   const expected =

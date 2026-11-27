@@ -28,8 +28,7 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-// @ts-expect-error Local .mjs module without a declaration shim (as the tests import it).
-import { parseSetting as ladderParseSetting } from "../ai-ladder.mjs";
+import { parseSetting } from "../ai-ladder.mjs";
 import { normalizeLesson } from "../lib/lesson-schema.mjs";
 import type { bridgeRequest } from "../../src/bridge-client";
 import {
@@ -343,7 +342,7 @@ export function lessonFixture(
   index: number,
   spec: LessonSpec = LESSON_SPECS[index],
 ): LessonFixture {
-  const g = withRunId(recordFor(20261120 + index, r), runIdFor(index));
+  const g = withRunId(recordFor(r), runIdFor(index));
   const e = encounterFor(g, 0);
   const contract = contractFor(
     g,
@@ -1141,13 +1140,6 @@ export async function buildLessonCases({
   }
   return { lesson, "lesson-chat": chat };
 }
-
-/** The ladder's own `<model>:<effort>` grammar, typed for this builder. */
-const parseSetting = ladderParseSetting as (value: string) => {
-  model: string;
-  effort: string;
-  setting: string;
-};
 
 export type LadderRow = {
   caseId: string;

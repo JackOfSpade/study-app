@@ -11,7 +11,6 @@ import { join } from "node:path";
 import test from "node:test";
 // @ts-expect-error Local .mjs module is exercised directly without a declaration shim.
 import { buildPrompt } from "../scripts/claude-gateway.mjs";
-// @ts-expect-error Local .mjs module is exercised directly without a declaration shim.
 import { readCases } from "../scripts/ai-ladder.mjs";
 import {
   buildChatFromLessons,

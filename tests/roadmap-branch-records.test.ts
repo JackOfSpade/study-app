@@ -60,7 +60,7 @@ function reply(p: RoadmapReconciliationPayload): RoadmapReconciliation {
   };
 }
 async function setup() {
-  const g = createRecord(7, r);
+  const g = createRecord(r);
   g.study.profile = "live";
   let raw = revision(r.raw, r.sourceHash, 10);
   const start = raw.indexOf("<!-- BEGIN PE_PROGRESS -->"),

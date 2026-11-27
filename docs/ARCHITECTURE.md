@@ -44,7 +44,7 @@ TypeScript, a semantic DOM and Vite build the local browser app (`src/`, entry `
 
 **Execution**
 
-- `execution.ts`: eligibility (live profile, a runtime on the question, depth 2 or above and a match with the scheduled scope) and `POST /api/execute`. Receipts carry the code, revision, hashes, image ID and output; they are observations, not correctness.
+- `execution.ts`: the run receipts a question keeps and the evidence an assessment reads from its finished runs. No control in the app starts a run any more (the Run code button went with the old answer editor); the eligibility check (live profile, a runtime on the question, depth 2 or above and a match with the scheduled scope) and the `POST /api/execute` call remain, exercised only by `tests/execution.test.ts`. Receipts carry the code, revision, hashes, image ID and output; they are observations, not correctness.
 
 **Persistence**
 

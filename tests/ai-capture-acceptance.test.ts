@@ -61,7 +61,7 @@ test("only the hint button turns the tutor's offer into an unlocked hint", async
   const question = TURNS.find((t) => t.id.startsWith("open-recomputes"))!;
   const run = async (acceptHint: boolean) => {
     const r = roadmap();
-    const g = recordFor(20261950, r);
+    const g = recordFor(r);
     const e = encounterFor(g, 0);
     const contract = contractFor(g, r, question.question as never, 1, 0);
     e.problem = {

@@ -24,7 +24,7 @@ const r: Roadmap = JSON.parse(readFileSync("public/curriculum.json", "utf8"));
 const excerpt =
   "Synthetic independent changed-context reasoning covers the complete reviewed requirement; actual runtime execution was not claimed.";
 async function review(track: Track, name: string, mode = "valid") {
-  const g = createRecord(7, r);
+  const g = createRecord(r);
   g.study.profile = "live";
   const requirement = finalRequirements(r, track).find((d) => d.name === name)!;
   const id = "S0007-EV98",

@@ -14,7 +14,7 @@ function setup() {
   const r = structuredClone(roadmap);
   const s = initialStudy(r, "live");
   activateCareerFocus(r, s);
-  return { r, g: createRecord(125, r, s) };
+  return { r, g: createRecord(r, s) };
 }
 const issued: Contract = {
   id: "issued-synthetic",

@@ -8,7 +8,7 @@ import { decode, encode, recover } from "../src/persistence";
 import { createRecord } from "./helpers/record";
 const r: Roadmap = JSON.parse(readFileSync("public/curriculum.json", "utf8"));
 function fixture() {
-  const g = createRecord(7, r),
+  const g = createRecord(r),
     e = g.encounters["question-0"];
   e.state = "in-progress";
   e.contributors = ["human"];

@@ -28,7 +28,7 @@ test("app source has no local questions to fall back on", () => {
 });
 
 test("a new live record holds no question until Claude writes one", () => {
-  const g = createRecord(42, roadmap, initialStudy(roadmap, "live"));
+  const g = createRecord(roadmap, initialStudy(roadmap, "live"));
   assert.ok(questions(g).length > 0);
   for (const e of questions(g)) assert.equal(e.problem, undefined);
 });
@@ -51,7 +51,7 @@ test("without Claude, opening a question asks nothing and invents no question", 
     requests++;
     throw Error("no request expected");
   }) as typeof fetch;
-  const g = createRecord(42, roadmap, initialStudy(roadmap, "live"));
+  const g = createRecord(roadmap, initialStudy(roadmap, "live"));
   const e = questions(g)[0];
   await ensureProblem(g, e, roadmap);
   assert.equal(e.problem, undefined);
@@ -60,7 +60,7 @@ test("without Claude, opening a question asks nothing and invents no question", 
 });
 
 test("a saved practice record moves to live and keeps its learning", () => {
-  const g = createRecord(42, roadmap);
+  const g = createRecord(roadmap);
   preparePracticeRooms(g, roadmap);
   const learner = g.study.learner;
   const assessments = g.study.assessments;
@@ -89,7 +89,7 @@ test("a saved practice record moves to live and keeps its learning", () => {
 });
 
 test("moving to live keeps knowledge records and never keeps an old practice question", async (t) => {
-  const g = createRecord(42, roadmap);
+  const g = createRecord(roadmap);
   preparePracticeRooms(g, roadmap);
   g.study.version = 9;
   g.study.knowledgeGaps = [{ id: "gap" } as never];
@@ -120,7 +120,7 @@ test("moving to live keeps knowledge records and never keeps an old practice que
 });
 
 test("moving to live leaves questions Claude already wrote alone", () => {
-  const g = createRecord(42, roadmap);
+  const g = createRecord(roadmap);
   const e = questions(g)[0];
   e.problem = { ...devProblem(g, roadmap), provenance: "claude-cli" };
   e.state = "in-progress";

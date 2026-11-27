@@ -1,5 +1,9 @@
 import { HELP_GATE_GUIDANCE } from "../scripts/lib/help-gate.mjs";
 import {
+  FINDING_STATUSES as FINDING_STATUS_LIST,
+  FLUENCY as FLUENCY_LIST,
+} from "../scripts/lib/probe-reply.mjs";
+import {
   QUESTION_ADAPTATION_GUIDANCE,
   TUTOR_JUDGEMENT_GUIDANCE,
 } from "../scripts/lib/study-question-policy.mjs";
@@ -278,13 +282,8 @@ function cutCodeUnits(value: string, length: number) {
   return /[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut;
 }
 
-const FINDING_STATUSES = new Set<string>(["demonstrated", "implied", "gap"]);
-const FLUENCY = new Set<string>([
-  "fluent",
-  "partial",
-  "guessing",
-  "declared-gap",
-]);
+const FINDING_STATUSES = new Set<string>(FINDING_STATUS_LIST);
+const FLUENCY = new Set<string>(FLUENCY_LIST);
 const shortText = (v: unknown, limit: number) =>
   typeof v === "string" && v.trim() ? v.trim().slice(0, limit) : undefined;
 

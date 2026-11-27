@@ -112,7 +112,7 @@ export function problemFrom(answer: unknown): Problem {
 function encounterForProblem(r: Roadmap, index: number, problem: Problem) {
   const generated = problem.contract;
   const scenario = scenarioFor(r, generated, index);
-  const g = recordFor(20261200 + index, r);
+  const g = recordFor(r);
   const e = encounterFor(g, index);
   const scheduled = contractFor(
     g,

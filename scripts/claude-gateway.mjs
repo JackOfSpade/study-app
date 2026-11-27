@@ -300,6 +300,16 @@ export function textFieldReader() {
     return out;
   };
 }
+/** CLI flags that keep the learner's own tools, CLAUDE.md, hooks, memory, MCP
+ * servers and slash commands out of every call (the gateway's and the judge's). */
+export const LOCKDOWN_ARGS = Object.freeze([
+  "--tools",
+  "",
+  "--setting-sources",
+  "",
+  "--strict-mcp-config",
+  "--disable-slash-commands",
+]);
 export function claudeArgs({ model, effort, system, stream }) {
   return [
     "-p",
@@ -310,13 +320,7 @@ export function claudeArgs({ model, effort, system, stream }) {
     effort,
     "--system-prompt",
     system,
-    // These keep the learner's own CLAUDE.md, hooks, memory and MCP servers out.
-    "--tools",
-    "",
-    "--setting-sources",
-    "",
-    "--strict-mcp-config",
-    "--disable-slash-commands",
+    ...LOCKDOWN_ARGS,
     "--input-format",
     "stream-json",
     "--output-format",
@@ -623,7 +627,7 @@ function tutorShape(payload, answer) {
   return shape;
 }
 /** The failure's own code in lower-kebab form; a killed timer reads as timeout. */
-function failureOutcome(error) {
+export function failureOutcome(error) {
   if (error?.meta?.timedOut) return "timeout";
   return (
     String(error?.code ?? "")
@@ -632,7 +636,8 @@ function failureOutcome(error) {
       .replace(/_/g, "-") || "error"
   );
 }
-const sumKnown = (values) => {
+/** Sum of the finite numbers, or null when none is known. */
+export const sumKnown = (values) => {
   const known = values.filter(
     (value) => typeof value === "number" && Number.isFinite(value),
   );

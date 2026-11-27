@@ -18,7 +18,7 @@ const actions = {
 };
 
 test("H04 puzzle, tutor and code directives stay data; only scoped validation can act and hostile findings cannot mutate the ledger", async () => {
-  const g = createRecord(71, r),
+  const g = createRecord(r),
     e = g.encounters["question-0"],
     original = globalThis.fetch;
   g.study.profile = "live";

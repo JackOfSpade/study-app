@@ -29,7 +29,7 @@ test("real bridge and gateway: chat follow-up, malformed correction, interrupted
         capabilities: [],
       });
     await checkBridge();
-    let g = createRecord(1, roadmap),
+    let g = createRecord(roadmap),
       e = g.encounters["question-0"];
     assert.equal(e.runId, g.id, "encounter sessions must use the record ID");
     preparePracticeRooms(g, roadmap);

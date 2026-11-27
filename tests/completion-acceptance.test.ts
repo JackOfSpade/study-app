@@ -9,7 +9,7 @@ const roadmap: Roadmap = JSON.parse(
   readFileSync("public/curriculum.json", "utf8"),
 );
 function fixture() {
-  const g = createRecord(71, roadmap),
+  const g = createRecord(roadmap),
     e = g.encounters["question-0"];
   g.study.profile = "live";
   e.problem = {

@@ -487,7 +487,7 @@ async function openReconciliation(
   roadmap: Roadmap,
   candidate: string,
 ): Promise<{ g: ReturnType<typeof createRecord>; payload: RoadmapPayload }> {
-  const g = createRecord(7, roadmap);
+  const g = createRecord(roadmap);
   g.study.profile = "live";
   let payload: unknown;
   await reconcileRoadmap(g, roadmap, candidate, async (captured) => {
@@ -677,7 +677,7 @@ if (entry === fileURLToPath(import.meta.url)) {
 
 /** A fresh live record, mirroring the study fixture the reference test proves. */
 function liveStudy(roadmap: Roadmap) {
-  const g = createRecord(7, roadmap);
+  const g = createRecord(roadmap);
   g.study.profile = "live";
   if (!g.study.learner) throw Error("a live study profile has no learner");
   return { g, l: g.study.learner };

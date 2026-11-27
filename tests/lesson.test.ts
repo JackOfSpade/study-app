@@ -54,7 +54,7 @@ const OTHER = { ...LESSON, title: "A different angle" };
 
 /** A study record with an unasked question to hang a problem on. */
 function fixture() {
-  const g = createRecord(1, r, initialStudy(r, "live"));
+  const g = createRecord(r, initialStudy(r, "live"));
   const contract = eligible(r, g.study);
   const e = g.encounters["question-0"];
   e.problem = devProblem(Object.assign({ rng: 3 }, g), r, contract);
@@ -263,7 +263,7 @@ test("open gaps are newest first, unresolved only and de-duplicated by facet, de
     openLessonGaps(g).map((x) => x.id),
     ["new", "other", "deeper"],
   );
-  assert.deepEqual(openLessonGaps(createRecord(2, r)), []);
+  assert.deepEqual(openLessonGaps(createRecord(r)), []);
 });
 
 test("the lesson payload carries the gap and its source question and nothing private", () => {

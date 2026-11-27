@@ -378,8 +378,8 @@ async function withBridge(handler: Handler, run: () => Promise<void>) {
   }
 }
 
-function recordFor(seed: number, r: Roadmap) {
-  const g = createRecord(seed, r, initialStudy(r, "live"));
+function recordFor(r: Roadmap) {
+  const g = createRecord(r, initialStudy(r, "live"));
   return g;
 }
 
@@ -502,7 +502,7 @@ async function buildGenerate(
     SCENARIOS.find((s) => s.track === track && s.topic === topic) ??
     SCENARIOS[0];
   const depth = track === "PY" ? [1, 2, 3][Math.floor(variant / 2) % 3] : 1;
-  const g = recordFor(20260900 + variant, r);
+  const g = recordFor(r);
   const e = encounterFor(g, 0);
   const contract = contractFor(g, r, scenario, depth, variant);
   seedProbes(g, contract, variant);
@@ -594,7 +594,7 @@ async function buildTutor(
       (variant + Math.floor(variant / STAGES.length)) % SCENARIOS.length
     ];
   const depth = scenario.track === "PY" ? 1 + (variant % 2) : 1;
-  const g = recordFor(20261000 + variant, r);
+  const g = recordFor(r);
   const e = encounterFor(g, variant);
   const contract = contractFor(g, r, scenario, depth, variant);
   e.problem = problemFor(scenario, contract, depth);
@@ -636,7 +636,7 @@ async function buildAssess(
   const scenario = SCENARIOS[variant % SCENARIOS.length];
   const kind = EVIDENCE_KINDS[Math.floor(variant / SCENARIOS.length) % 4];
   const depth = scenario.track === "PY" ? 1 + (variant % 2) : 1;
-  const g = recordFor(20261100 + variant, r);
+  const g = recordFor(r);
   const e = encounterFor(g, variant);
   const contract = contractFor(g, r, scenario, depth, variant);
   e.problem = problemFor(scenario, contract, depth);

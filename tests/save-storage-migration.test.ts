@@ -51,7 +51,7 @@ beforeEach(() => {
 });
 
 test("a save only in the earlier localStorage key loads and moves to the new key", async () => {
-  const g = createRecord(801, roadmap);
+  const g = createRecord(roadmap);
   local.items.set(LEGACY_KEY, stored(g, 10));
   const loaded = (await load())!;
   assert.equal(loaded.id, g.id);
@@ -64,7 +64,7 @@ test("a save only in the earlier localStorage key loads and moves to the new key
 });
 
 test("a save only in the earlier database loads, and the database is deleted after a newer durable write, keeping other entries", async () => {
-  const g = createRecord(802, roadmap);
+  const g = createRecord(roadmap);
   idb.seed(LEGACY_DB, {
     [LEGACY_KEY]: stored(g, 20),
     [LOGS]: "synthetic logs",
@@ -88,8 +88,8 @@ test("a save only in the earlier database loads, and the database is deleted aft
 });
 
 test("the newest serial wins across legacy and new copies, in both directions", async () => {
-  const older = createRecord(803, roadmap),
-    newer = createRecord(804, roadmap);
+  const older = createRecord(roadmap),
+    newer = createRecord(roadmap);
   // A tab still on the earlier build saved after this build's last save.
   idb.seed(DB, { [KEY]: stored(older, 5) });
   local.items.set(KEY, stored(older, 5));
@@ -105,7 +105,7 @@ test("the newest serial wins across legacy and new copies, in both directions", 
 });
 
 test("nothing legacy is removed before the new copy is safely written", async () => {
-  const g = createRecord(805, roadmap);
+  const g = createRecord(roadmap);
   idb.seed(LEGACY_DB, { [LEGACY_KEY]: stored(g, 30) });
   local.items.set(LEGACY_KEY, stored(g, 30));
   const loaded = (await load())!;
@@ -124,7 +124,7 @@ test("nothing legacy is removed before the new copy is safely written", async ()
 });
 
 test("failed new writes leave every legacy copy in place", async () => {
-  const g = createRecord(806, roadmap);
+  const g = createRecord(roadmap);
   idb.seed(LEGACY_DB, { [LEGACY_KEY]: stored(g, 40) });
   local.items.set(LEGACY_KEY, stored(g, 40));
   const loaded = (await load())!;
@@ -158,7 +158,7 @@ test("the earlier database is never created when absent, with or without databas
     idb.install({ withDatabases });
     local.reset();
     assert.equal(await load(), null);
-    const g = createRecord(807, roadmap);
+    const g = createRecord(roadmap);
     await saved(g);
     assert.equal(JSON.parse(await exportRecoveryBackup()).legacyDurable, null);
     assert.deepEqual(idb.names(), [DB]);
@@ -173,7 +173,7 @@ test("the earlier database is never created when absent, with or without databas
 });
 
 test("a legacy copy newer than what was just written is kept", async () => {
-  const g = createRecord(808, roadmap);
+  const g = createRecord(roadmap);
   idb.seed(LEGACY_DB, { [LEGACY_KEY]: stored(g, 50) });
   local.items.set(LEGACY_KEY, stored(g, 50));
   const loaded = (await load())!;
@@ -192,7 +192,7 @@ test("a legacy copy newer than what was just written is kept", async () => {
 });
 
 test("an unreadable legacy store blocks loading only when that store has no new copy", async () => {
-  const g = createRecord(809, roadmap);
+  const g = createRecord(roadmap);
   idb.seed(LEGACY_DB, { [LEGACY_KEY]: stored(g, 60) });
   idb.failures.open.add(LEGACY_DB);
   await assert.rejects(load(), /could not be read/);
@@ -217,7 +217,7 @@ test("an unreadable legacy store blocks loading only when that store has no new 
 });
 
 test("a delete blocked by another tab never holds up saving and finishes later", async () => {
-  const g = createRecord(810, roadmap);
+  const g = createRecord(roadmap);
   idb.seed(LEGACY_DB, { [LEGACY_KEY]: stored(g, 80) });
   const other = idb.stubbornConnection(LEGACY_DB);
   try {
@@ -244,7 +244,7 @@ test("a delete blocked by another tab never holds up saving and finishes later",
 });
 
 test("damaged legacy copies are reported with their bytes and removed only once offered", async () => {
-  const g = createRecord(811, roadmap);
+  const g = createRecord(roadmap);
   idb.seed(DB, { [KEY]: `${stored(g, 90).slice(0, -30)}synthetic damage` });
   local.items.set(KEY, stored(g, 90));
   local.items.set(LEGACY_KEY, "synthetic damaged legacy local");
