@@ -301,6 +301,18 @@ test("a generated reply's parts become the stored staged question", async () => 
     partSolveSeconds = [60, 60];
     await ensureProblem(g, e, roadmap);
     assert.equal(e.problem!.partSolveSeconds, undefined);
+    // So is a non-positive or non-number entry; an overrun the relay let
+    // through on its last attempt is kept as measured.
+    for (const [times, kept] of [
+      [[0], undefined],
+      [["60"], undefined],
+      [[900], [900]],
+    ] as const) {
+      regenerateQuestion(g, e, roadmap);
+      partSolveSeconds = times;
+      await ensureProblem(g, e, roadmap);
+      assert.deepEqual(e.problem!.partSolveSeconds, kept);
+    }
     assert.equal(e.problem!.staged, undefined);
     assert.equal(e.problem!.prompt, "SHARED facts.\n\nOnly ask");
     regenerateQuestion(g, e, roadmap);

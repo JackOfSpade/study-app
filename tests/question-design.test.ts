@@ -258,10 +258,13 @@ test("a question has no total time limit, but each part does", () => {
   assert.throws(() => validateAnswer(job, parts(0)), /one or more nonempty/);
   // A part over the limit is sent back to be split into steps, and so is a
   // missing or miscounted list, but never refused on the last try.
-  const over = { ...answer(900, [60, 600]), parts: ["Pick one.", "Build it."] };
+  const over = {
+    ...answer(1200, [60, 601]),
+    parts: ["Pick one.", "Build it."],
+  };
   assert.throws(
     () => validateAnswer(job, over),
-    /parts\[1\] is estimated at 600 seconds.*cut any ask in it the skill does not need.*split what remains into consecutive steps.*one function, method or distinct piece of behaviour per part/,
+    /parts\[1\] is estimated at 601 seconds.*cut any ask in it the skill does not need.*split what remains into consecutive steps.*one function, method or distinct piece of behaviour per part/,
   );
   assert.doesNotThrow(() => validateAnswer(job, over, { final: true }));
   const miscounted = { ...answer(120, [60]), parts: ["Pick one.", "Why?"] };
@@ -269,6 +272,12 @@ test("a question has no total time limit, but each part does", () => {
     () => validateAnswer(job, miscounted),
     /partSolveSeconds, an array of 2 numbers/,
   );
+  // A zero or negative estimate is malformed, not short.
+  for (const bad of [[0], [-5]])
+    assert.throws(
+      () => validateAnswer(job, answer(60, bad)),
+      /Return partSolveSeconds/,
+    );
   const { partSolveSeconds: _, ...missing } = answer(60);
   assert.throws(() => validateAnswer(job, missing), /Return partSolveSeconds/);
   assert.doesNotThrow(() => validateAnswer(job, missing, { final: true }));
@@ -284,13 +293,37 @@ test("a question has no total time limit, but each part does", () => {
   const instructions = taskInstructions("generate", { contract }) as string;
   assert.doesNotMatch(instructions, /15 minutes|one sitting/);
   assert.match(instructions, /The whole question has no time limit/);
-  assert.match(instructions, /at most 5 minutes each/);
+  assert.match(instructions, /at most 10 minutes each/);
   assert.match(
     instructions,
     /a long implementation is built over several parts, one function, method or distinct piece of behaviour per part/,
   );
   assert.match(instructions, /states that result in one short line/);
   assert.match(instructions, /continue with the approach they chose/);
+  assert.match(
+    instructions,
+    /states that result in one short line before its ask, as the starting point/,
+  );
+  assert.match(
+    instructions,
+    /The consecutive steps of a problem too long for one part are not extra asks/,
+  );
+  assert.match(
+    taskInstructions("assess", { contract }) as string,
+    /a result that a later part states is never help for an answer given in an earlier part/,
+  );
+  const tutor = taskInstructions("tutor", {
+    contract,
+    stage: { part: 1, of: 2, question: "Pick one." },
+  }) as string;
+  assert.match(
+    tutor,
+    /answered correctly and accepted \(later parts build on this one/,
+  );
+  assert.match(
+    tutor,
+    /name in one sentence a reasonable choice or the correct result/,
+  );
   for (const op of ["generate", "tutor", "assess"])
     assert.doesNotMatch(
       taskInstructions(op, { contract }) as string,
