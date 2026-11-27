@@ -1,18 +1,37 @@
-import { isProvider } from "./model";
 import {
   facetMappingShapeValid,
+  scopeKey,
   type FacetProof,
   type LearnerLedger,
 } from "./learning-model";
-import type { Roadmap, Track } from "./model";
-import { observationInvalidated } from "./observation-validity";
+import { isProvider, type Roadmap, type Track } from "./model";
+import {
+  adoptedSourceText,
+  observationInvalidated,
+} from "./observation-validity";
 import type {
   ImportedFacetMapping,
   RoadmapAdoptionReceipt,
 } from "./roadmap-adoption-types";
 import { isAssessedToken, isAssessedTokenFor } from "./roadmap-export-names";
 import { receiptRows } from "./roadmap-structure";
-import { CELL_SEPARATOR } from "./table-row";
+import { tableCells } from "./table-row";
+
+export { adoptedSourceText };
+
+/** The trimmed cells of the first adopted row in `prefix` whose key ends in
+ * `/suffixId`. */
+function receiptCells(
+  receipt: RoadmapAdoptionReceipt,
+  prefix: string,
+  suffixId: string,
+) {
+  for (const [key, row] of receiptRows(receipt))
+    if (key.startsWith(prefix) && key.endsWith(`/${suffixId}`))
+      return tableCells(row);
+  return undefined;
+}
+
 /** Manual merged roadmaps may bind final evidence in the authoritative final
  * register instead of repeating a synthetic D4 label in the observation title.
  * An explicit conflicting depth is never overridden by that cross-reference. */
@@ -32,14 +51,7 @@ function finalRegisterDepth(
   const heading = integration
     ? "0.8 Integration coverage"
     : "0.7 Topic transfer and retention";
-  const row = [...receiptRows(receipt)].find(
-    ([key]) =>
-      key.startsWith(`${track}_PROGRESS/${heading}/`) && key.endsWith(`/${id}`),
-  )?.[1];
-  const c = row
-    ?.split(CELL_SEPARATOR)
-    .slice(1, -1)
-    .map((c) => c.trim());
+  const c = receiptCells(receipt, `${track}_PROGRESS/${heading}/`, id);
   if (
     !c ||
     (integration ? c[1] !== "ACTIVE" : !["U", "G", "P", "R"].includes(c[1]))
@@ -72,17 +84,13 @@ export function importedMappingValid(
       throw Error(
         "Imported proof requires a canonical source evidence identifier",
       );
-    const found = [...receiptRows(v)].find(
-      ([key]) =>
-        key.startsWith(`${track}_PROGRESS/0.5 Assessment evidence register/`) &&
-        key.endsWith(`/${ref}`),
+    const c = receiptCells(
+      v,
+      `${track}_PROGRESS/0.5 Assessment evidence register/`,
+      ref,
     );
-    if (!found) throw Error("Imported proof has no exact source evidence row");
-    const c = found[1]
-        .split(CELL_SEPARATOR)
-        .slice(1, -1)
-        .map((c) => c.trim()),
-      excerpt = m.sourceExcerpts?.[ref];
+    if (!c) throw Error("Imported proof has no exact source evidence row");
+    const excerpt = m.sourceExcerpts?.[ref];
     const scoped = (
         (c[3].match(/\b[TXI]\d{2}(?:\.\d+)?\b/g) ?? []) as string[]
       ).includes(id),
@@ -102,15 +110,11 @@ export function importedMappingValid(
     )
       throw Error("Imported evidence scope or exact excerpt does not match");
     if (m.outcome === "unknown") continue;
-    const attempt = [...receiptRows(v)]
-      .find(
-        ([key]) =>
-          key.startsWith(`${track}_PROGRESS/0.5.1 Attempt status register/`) &&
-          key.endsWith(`/${c[1]}`),
-      )?.[1]
-      .split(CELL_SEPARATOR)
-      .slice(1, -1)
-      .map((c) => c.trim());
+    const attempt = receiptCells(
+      v,
+      `${track}_PROGRESS/0.5.1 Attempt status register/`,
+      c[1],
+    );
     if (!attempt || /^INVALIDATED\b/.test(attempt[3]))
       throw Error(
         "Imported observation requires an issued, non-invalidated source attempt",
@@ -157,6 +161,7 @@ export function importedMappingValid(
   }
   return true;
 }
+
 export function importedProofValid(
   r: Roadmap,
   l: LearnerLedger,
@@ -167,7 +172,7 @@ export function importedProofValid(
   outcome: FacetProof["outcome"] = "independent",
 ) {
   if (observationInvalidated(r, l, id, ref)) return false;
-  const scopeId = `${id}/${/^(PY|PE):(?:[TX]\d{2}|I\d{2})$/.test(id) ? "T4" : `D${depth}`}`;
+  const scopeId = scopeKey(id, depth);
   for (const receipt of [...(l.roadmapAdoptions ?? [])].reverse())
     for (const mapping of receipt.proposal.mappings) {
       if (
@@ -185,17 +190,18 @@ export function importedProofValid(
     }
   return false;
 }
-export const adoptedSourceText = (l?: LearnerLedger) =>
-  l?.roadmapAdoptions?.at(-1)?.proposal.canonical;
+
 const adoptedTrackProgress = (l: LearnerLedger | undefined, track: Track) =>
   adoptedSourceText(l)
     ?.split(`<!-- BEGIN ${track}_PROGRESS -->`)[1]
     ?.split(`<!-- END ${track}_PROGRESS -->`)[0];
+
 export const trackProgressContext = (
   l: LearnerLedger | undefined,
   r: Roadmap,
   track: Track,
 ) => adoptedTrackProgress(l, track) ?? r.tracks[track].progress;
+
 /**
  * The practical environment status restored by adopted roadmaps. Every
  * adoption's mapping is checked against its own source row, and the latest
@@ -215,16 +221,11 @@ function importedEnvironment(
   for (const receipt of l.roadmapAdoptions ?? [])
     for (const m of receipt.proposal.environment ?? []) {
       if (m.envId !== id) continue;
-      const found = [...receiptRows(receipt)].find(
-        ([key]) =>
-          key.startsWith(
-            "PE_PROGRESS/0.8.1 Environment-backed verification/",
-          ) && key.endsWith(`/${id.split(":")[1]}`),
+      const c = receiptCells(
+        receipt,
+        "PE_PROGRESS/0.8.1 Environment-backed verification/",
+        id.split(":")[1],
       );
-      const c = found?.[1]
-        .split(CELL_SEPARATOR)
-        .slice(1, -1)
-        .map((c) => c.trim());
       if (
         receipt.sourceHash !== r.sourceHash ||
         !isProvider(receipt.provenance) ||
@@ -244,6 +245,7 @@ function importedEnvironment(
     }
   return latest;
 }
+
 export function importedEnvironmentStatus(
   r: Roadmap,
   l: LearnerLedger,
@@ -252,6 +254,7 @@ export function importedEnvironmentStatus(
 ) {
   return importedEnvironment(r, l, id, scope)?.status ?? "U";
 }
+
 /** Only references from the source row that set the imported status. */
 export function importedEnvironmentEvidence(
   r: Roadmap,

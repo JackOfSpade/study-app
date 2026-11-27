@@ -8,3 +8,11 @@
  * Exports write `|` as `&#124;`; this protects documents from elsewhere.
  */
 export const CELL_SEPARATOR = /(?<!(?:^|[^\\])(?:\\\\)*\\)\|/;
+
+/** A table row's trimmed cells without the empty strings around its outer
+ * pipes, so the first cell is index 0 (unlike `line.split(CELL_SEPARATOR)`). */
+export const tableCells = (line: string) =>
+  line
+    .split(CELL_SEPARATOR)
+    .slice(1, -1)
+    .map((cell) => cell.trim());

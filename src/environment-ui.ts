@@ -8,6 +8,8 @@ import {
   finalRequirements,
   finalRequirementStatus,
 } from "./final-requirements";
+import type { EnvironmentReviewJob } from "./environment-review";
+import type { EnvironmentEvidence } from "./environment-status";
 import type { StudyRecord, Roadmap } from "./model";
 import { download } from "./dom";
 const refreshers = new WeakMap<HTMLElement, () => void>();
@@ -36,41 +38,55 @@ export function renderEnvironmentObservations(
   showScope();
   const list = () => {
     const items = g.study.environmentObservations ?? [],
+      reviews = g.study.environmentReviews ?? [],
+      learner = g.study.learner,
       box = section.querySelector<HTMLElement>(
         "#environment-observation-list",
       )!;
-    box.innerHTML = `<p>${items.length} saved observation packet${items.length === 1 ? "" : "s"} · ${g.study.environmentReviews?.filter((j) => j.state === "applied").length ?? 0} reviewed. ENV completion remains separate.</p>${[
+    const jobByObservation = new Map<string, EnvironmentReviewJob>();
+    for (const j of reviews)
+      if (!jobByObservation.has(j.observationId))
+        jobByObservation.set(j.observationId, j);
+    const evidenceByObservation = new Map<string, EnvironmentEvidence[]>();
+    for (const v of learner?.environmentEvidence ?? []) {
+      const id = v.payload.observation.id;
+      evidenceByObservation.set(id, [
+        ...(evidenceByObservation.get(id) ?? []),
+        v,
+      ]);
+    }
+    const anyPending = reviews.some((j) => j.state === "pending"),
+      statusById = new Map<string, string>();
+    // An observation may name an ENV item this curriculum source no longer has.
+    const status = (envId: string) => {
+      let value = statusById.get(envId);
+      if (value === undefined) {
+        const d = definitions.find((d) => d.id === envId);
+        value = !learner
+          ? "U"
+          : d
+            ? finalRequirementStatus(r, learner, d)
+            : "not in this curriculum source";
+        statusById.set(envId, value);
+      }
+      return value;
+    };
+    box.innerHTML = `<p>${items.length} saved observation packet${items.length === 1 ? "" : "s"} · ${reviews.filter((j) => j.state === "applied").length} reviewed. ENV completion remains separate.</p>${[
       ...items,
     ]
       .reverse()
       .slice(0, 30)
-      .map(
-        (o) =>
-          `<article><strong>${escape(o.envId)} · ${escape(
-            g.study.learner
-              ? finalRequirementStatus(
-                  r,
-                  g.study.learner,
-                  definitions.find((d) => d.id === o.envId)!,
-                )
-              : "U",
-          )} · ${escape(g.study.environmentReviews?.find((j) => j.observationId === o.id)?.state ?? "pending review")}</strong><p>${escape(o.capturedAt)} · ${escape(o.profile)} profile · ${o.execution ? "runner receipt attached" : o.suppliedOutput ? "learner-supplied output" : "reported exposure only"} · independence unassessed</p><pre>${escape(o.learnerStatement.slice(0, 500))}</pre><button type="button" data-environment-download="${escape(o.id)}" class="quiet">Download observation packet</button>${review && !g.study.environmentReviews?.some((j) => j.observationId === o.id && j.state === "applied") ? `<button type="button" data-environment-review="${escape(o.id)}" ${g.study.environmentReviews?.some((j) => j.state === "pending") ? "disabled" : ""}>${g.study.environmentReviews?.some((j) => j.observationId === o.id) ? "Retry review" : "Review observation"}</button>` : ""}<p>${escape(g.study.environmentReviews?.find((j) => j.observationId === o.id)?.error ?? g.study.learner?.environmentEvidence?.find((v) => v.payload.observation.id === o.id)?.judgment.rationale ?? "Relevant output and ownership remain unreviewed.")}</p></article>`,
-      )
+      .map((o) => {
+        const job = jobByObservation.get(o.id),
+          evidence = evidenceByObservation.get(o.id) ?? [];
+        return `<article><strong>${escape(o.envId)} · ${escape(status(o.envId))} · ${escape(job?.state ?? "pending review")}</strong><p>${escape(o.capturedAt)} · ${escape(o.profile)} profile · ${o.execution ? "runner receipt attached" : o.suppliedOutput ? "learner-supplied output" : "reported exposure only"} · independence unassessed</p><pre>${escape(o.learnerStatement.slice(0, 500))}</pre><button type="button" data-environment-download="${escape(o.id)}" class="quiet">Download observation packet</button>${review && job?.state !== "applied" ? `<button type="button" data-environment-review="${escape(o.id)}" ${anyPending ? "disabled" : ""}>${job ? "Retry review" : "Review observation"}</button>` : ""}<p>${escape(job?.error ?? evidence[0]?.judgment.rationale ?? "Relevant output and ownership remain unreviewed.")}</p>${evidence
+          .map(
+            (entry) =>
+              `<p>${escape(`Reviewed through ${providerLabel(entry.provenance)}. This packet: ${entry.judgment.classification}. Covered: ${entry.judgment.covered.join("; ") || "none observed"}. Remaining: ${entry.judgment.remaining.join("; ") || "none in reviewed scope"}. ENV status is separate from independent academic proof.`)}</p>`,
+          )
+          .join("")}</article>`;
+      })
       .join("")}`;
-    for (const entry of g.study.learner?.environmentEvidence ?? []) {
-      const button = [
-        ...box.querySelectorAll<HTMLButtonElement>(
-          "[data-environment-download]",
-        ),
-      ].find(
-        (b) => b.dataset.environmentDownload === entry.payload.observation.id,
-      );
-      if (button) {
-        const detail = document.createElement("p");
-        detail.textContent = `Reviewed through ${providerLabel(entry.provenance)}. This packet: ${entry.judgment.classification}. Covered: ${entry.judgment.covered.join("; ") || "none observed"}. Remaining: ${entry.judgment.remaining.join("; ") || "none in reviewed scope"}. ENV status is separate from independent academic proof.`;
-        button.closest("article")?.append(detail);
-      }
-    }
     updated?.();
     for (const button of box.querySelectorAll<HTMLButtonElement>(
       "[data-environment-download]",
@@ -97,6 +113,7 @@ export function renderEnvironmentObservations(
             !!g.study.environmentReviews?.some((j) => j.observationId === id),
           );
           list();
+          refocus(id);
           try {
             await persist();
           } catch {
@@ -104,6 +121,7 @@ export function renderEnvironmentObservations(
           }
           await pending;
           refresh();
+          refocus(id);
           await persist();
           status =
             host.querySelector<HTMLElement>("#environment-status") ?? status;
@@ -116,11 +134,33 @@ export function renderEnvironmentObservations(
               : `Review retained for retry: ${job?.error ?? "unavailable"}`;
         } catch (error) {
           refresh();
+          refocus(id);
           status =
             host.querySelector<HTMLElement>("#environment-status") ?? status;
           status.textContent = `Review/save unavailable; evidence retained for download. ${String(error)}`;
         }
       };
+  };
+  /** A re-render replaces the clicked button; give keyboard focus back to the
+   * same observation unless the learner has since moved focus elsewhere. */
+  const refocus = (id: string) => {
+    if (document.activeElement && document.activeElement !== document.body)
+      return;
+    const current = host.querySelector<HTMLElement>(
+        "#environment-observation-list",
+      ),
+      selector = CSS.escape(id),
+      reviewButton = current?.querySelector<HTMLButtonElement>(
+        `[data-environment-review="${selector}"]`,
+      );
+    // A disabled button cannot hold focus (every review button is disabled
+    // while one runs), so fall back to the observation's download button.
+    (reviewButton && !reviewButton.disabled
+      ? reviewButton
+      : current?.querySelector<HTMLElement>(
+          `[data-environment-download="${selector}"]`,
+        )
+    )?.focus();
   };
   refreshers.set(host, list);
   const refresh = () => (refreshers.get(host) ?? list)();

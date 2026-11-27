@@ -4,6 +4,7 @@ import test from "node:test";
 import { edit } from "../src/ai";
 import { eligible, initialStudy } from "../src/curriculum";
 import { canRunWorkspace, runWorkspace } from "../src/execution";
+import { executionText } from "../src/execution-presentation";
 import { initialLearner, reconcileGates } from "../src/learner";
 import { type Roadmap } from "../src/model";
 import { decode, encode, recover } from "../src/persistence";
@@ -129,6 +130,40 @@ test("a receipt for different code is rejected without creating execution eviden
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+test("a non-object runner reply is reported as an unavailable runner", async () => {
+  const { g, e } = fixture(),
+    originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response("null", { status: 502 });
+  try {
+    await runWorkspace(g, e, r);
+    assert.equal(e.executions![0].status, "error");
+    assert.match(e.executions![0].error!, /Runner unavailable \(HTTP 502\)/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+test("saved stdout and stderr stay on separate lines in the run output", () => {
+  const job = {
+    id: "j",
+    revision: 1,
+    language: "python" as const,
+    code: "",
+    artifactSequences: [],
+    status: "finished" as const,
+    receipt: {
+      id: "j",
+      language: "python" as const,
+      status: "completed" as const,
+      executed: true,
+      exitCode: 1,
+      stdout: "result=3",
+      stderr: "Traceback",
+    },
+  };
+  assert.match(executionText(job), /result=3\nTraceback$/);
+  job.receipt.stdout = "result=3\n";
+  assert.match(executionText(job), /result=3\nTraceback$/);
 });
 test("restart retains interrupted code snapshots in current and archived encounters without rerunning them", () => {
   const { g, e } = fixture();

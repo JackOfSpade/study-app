@@ -295,7 +295,7 @@ test("failed and interrupted requests retry their exact captured identity/contex
   const restored = recover(decode(encode(g)));
   assert.equal(restored.study.environmentReviews![0].state, "interrupted");
   let count = 0;
-  await reviewEnvironment(
+  const retried = reviewEnvironment(
     restored,
     r,
     o.id,
@@ -306,6 +306,10 @@ test("failed and interrupted requests retry their exact captured identity/contex
     },
     true,
   );
+  // A retry shows as running at once, before its integrity checks resolve.
+  assert.equal(restored.study.environmentReviews![0].state, "pending");
+  assert.equal(restored.study.environmentReviews![0].error, undefined);
+  await retried;
   assert.equal(count, 1);
   assert.equal(restored.study.learner!.environmentEvidence!.length, 1);
   assert.equal(

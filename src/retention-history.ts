@@ -2,6 +2,7 @@ import { addDays, isDelayedReview, localDate } from "./learner";
 import {
   reviewSignature,
   scopeKey,
+  trackOf,
   type LearnerLedger,
   type RetentionEvent,
   type ReviewRecord,
@@ -15,7 +16,7 @@ export const retentionEventText = (event: RetentionEvent) =>
 function advance(
   previous: ReviewRecord,
   session: string,
-  observedAt?: string,
+  observedAt: string,
 ): ReviewRecord {
   const stage = Math.min(2, previous.stage + 1);
   const next = {
@@ -24,7 +25,7 @@ function advance(
     verifiedReviews: previous.verifiedReviews + 1,
     lastIndependentAt: observedAt,
     sequence: session,
-    due: addDays(localDate(observedAt!), [3, 7, 21][stage]),
+    due: addDays(localDate(observedAt), [3, 7, 21][stage]),
   };
   delete next.lastIndependentDate;
   return next;
@@ -85,6 +86,8 @@ export function replayRetention(r: Roadmap, l: LearnerLedger, scopeId: string) {
       !receipt.evidenceIds.some((ref) => event.evidenceIds.includes(ref)) ||
       !definition.facets.every((f) => evidence.some((e) => e.facet === f.id)) ||
       !isDelayedReview(event.before, event.at, attempt.session) ||
+      // Every evidence item has an observedAt (checked above), so this is set.
+      !observedAt ||
       reviewSignature(advance(event.before, attempt.session, observedAt)) !==
         reviewSignature(event.after)
     )
@@ -180,7 +183,7 @@ export function reviewRetentionUpdates(
         "Reviewed retention must exactly replay the remaining valid observations without invented dates or counts",
       );
     const objective = parsed.tracks[
-      expected.objectiveId.startsWith("PY:") ? "PY" : "PE"
+      trackOf(expected.objectiveId)
     ].objectives.find((o) => o.id === expected.objectiveId);
     if (
       expected.depth === 1 &&

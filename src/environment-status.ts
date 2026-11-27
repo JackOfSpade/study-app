@@ -1,9 +1,14 @@
-import { isProvider } from "./model";
 import type { EnvironmentObservation } from "./environment-observations";
 import type { FinalRequirement } from "./final-requirements";
 import { importedEnvironmentStatus } from "./imported-proof";
 import type { LearnerLedger } from "./learning-model";
-import type { Provider, Artifact, Message, Roadmap } from "./model";
+import {
+  isProvider,
+  type Provider,
+  type Artifact,
+  type Message,
+  type Roadmap,
+} from "./model";
 export interface EnvironmentReviewPayload {
   requestId: string;
   /** Absent only on legacy native review packets. */

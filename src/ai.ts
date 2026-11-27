@@ -66,7 +66,7 @@ import {
   type Roadmap,
   type Submission,
   nextSeq,
-  PROVIDERS,
+  isProvider,
 } from "./model";
 import { reconcileRoadmap } from "./roadmap-adoption";
 import { settleTutorRequest, supersedeInterrupted } from "./run-learning";
@@ -92,11 +92,9 @@ const activeProvider = (): Provider =>
 const capturedProvider = (problem?: Problem): Provider =>
   status().mode === "claude-cli"
     ? "claude-cli"
-    : isAiProvenance(problem?.provenance)
+    : isProvider(problem?.provenance)
       ? problem.provenance
       : "claude-cli";
-const isAiProvenance = (p?: string): p is Provider =>
-  !!p && PROVIDERS.includes(p);
 /** The private session a tutor request belongs to. */
 const privateSession = (g: StudyRecord, e: Encounter) =>
   `${e.runId ?? g.id}/${e.id}/private`;
@@ -262,7 +260,7 @@ export function earlierQuestions(
         x !== current &&
         encounterKey(x) !== encounterKey(current) &&
         x.problem &&
-        isAiProvenance(x.problem.provenance) &&
+        isProvider(x.problem.provenance) &&
         x.problem.contract?.objectiveIds?.some((id) => ids.has(id)),
     )
     .sort(
@@ -617,7 +615,7 @@ export function presentProblem(g: StudyRecord, e: Encounter, r?: Roadmap) {
   if (
     r &&
     g.study.profile === "live" &&
-    isAiProvenance(e.problem?.provenance) &&
+    isProvider(e.problem?.provenance) &&
     e.state !== "consumed" &&
     !g.study.learner?.attempts.some((a) => a.encounter === encounterKey(e))
   ) {
