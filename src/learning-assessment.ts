@@ -1,4 +1,4 @@
-import { PROVIDERS } from "./model";
+import { isProvider } from "./model";
 import { bridgeRequest, isInterruption, status } from "./bridge-client";
 import { evidencePacket, syncLearningView } from "./curriculum";
 import { applyLearningAssessment, encounterKey } from "./learner";
@@ -108,7 +108,7 @@ async function runAssessment(
       "No persisted human learning task was issued. No academic credit.";
     return;
   }
-  if (!PROVIDERS.includes(e.problem.provenance) || study.profile !== "live") {
+  if (!isProvider(e.problem.provenance) || study.profile !== "live") {
     a.status = "review-required";
     a.provenance = "Development simulation cannot award academic credit.";
     return;

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { setImmediate as settle } from "node:timers/promises";
 import test from "node:test";
+import { fnv1a } from "../src/hash";
 import type { Roadmap } from "../src/model";
 import {
   decode,
@@ -167,6 +168,24 @@ test("a copy refused while the other loads is reported with its exact bytes", as
   copies.durable = copies.local = null;
   assert.equal(await load(), null);
   assert.equal(rejectedCopy(), undefined);
+});
+
+test("JSON that is not an envelope fails the integrity check, not a property read", async () => {
+  for (const text of ["null", "0", '"save"', "[]", "{}"])
+    assert.throws(() => decode(text), /^Error: Save integrity check failed$/);
+  const g = createRecord(732, roadmap);
+  // The envelope is a protected format: these exact bytes.
+  const payload = JSON.stringify(g);
+  assert.equal(
+    encode(g),
+    `{"schema":1,"payload":${JSON.stringify(payload)},"checksum":${fnv1a(payload)}}`,
+  );
+  copies.durable = JSON.stringify({ format: 2, serial: 5, data: encode(g) });
+  copies.local = "null";
+  assert.equal((await load())!.id, g.id);
+  assert.equal(rejectedCopy()?.store, "local");
+  assert.equal(rejectedCopy()?.reason, "Error: Save integrity check failed");
+  copies.durable = copies.local = null;
 });
 
 test("a draft larger than one megabyte has a full synchronous checkpoint before its durable write settles", async () => {

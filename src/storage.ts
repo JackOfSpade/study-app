@@ -3,7 +3,7 @@ const DB = "study-durable-state",
 /** The database's name before the rename. It is still read (never created)
  * and deleted once its save has a newer copy under the new name (see
  * `retireLegacyDurable` and AGENTS.md). */
-export const LEGACY_DB = "dead-air-durable-state";
+const LEGACY_DB = "dead-air-durable-state";
 
 /** Each instance owns its connection; rejected or closed connections are never cached. */
 export function createDurableStorage(
@@ -90,7 +90,7 @@ export function createDurableStorage(
   return { read, write };
 }
 
-export type LegacyFactory = Pick<IDBFactory, "open"> &
+type LegacyFactory = Pick<IDBFactory, "open"> &
   Partial<Pick<IDBFactory, "deleteDatabase" | "databases">>;
 
 /**
@@ -100,7 +100,7 @@ export type LegacyFactory = Pick<IDBFactory, "open"> &
  * versionchange transaction, which leaves nothing behind. Every call opens and
  * closes its own connection so the database can be deleted afterwards.
  */
-export function createLegacyDurableStorage(
+function createLegacyDurableStorage(
   factory: () => LegacyFactory = () => indexedDB,
   name = LEGACY_DB,
 ) {

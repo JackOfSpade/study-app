@@ -54,6 +54,8 @@ for (const removed of [0, 1])
       await route.fulfill({ json: fixture.proposal(payload) });
     });
     await page.goto("/");
+    // The app's hooks appear only once its first load finishes.
+    await page.waitForFunction(() => !!(window as any).__studyApp);
     await page.evaluate(async (saved) => {
       const root = "/src/",
         { decode, save } = await import(root + "persistence.ts");

@@ -10,11 +10,16 @@ import type { Assessment, Encounter, StudyRecord, TutorRequest } from "./model";
 /** What loading writes on a tutor request the page closed on (persistence.ts
  * `recover`). Earlier builds resent such a request once and then marked it
  * `resent`. */
-const RESTARTED_TUTOR =
+export const RESTARTED_TUTOR =
   "Application restarted; retry the exact saved private question.";
-/** The provenance loading writes on an assessment the page closed on, and
- * what earlier builds wrote for one cut off by a lost connection. A request
- * this build sends says so in `resume` instead. */
+/** The provenance loading writes on an assessment the page closed on
+ * (persistence.ts `recover`). */
+export const RESTARTED_ASSESSMENT =
+  "Application restarted during assessment. Evidence cutoff and request identity retained for retry.";
+/** Loading's restart note (its first alternative is the opening of
+ * `RESTARTED_ASSESSMENT`), and what earlier builds wrote for an assessment cut
+ * off by a lost connection. A request this build sends says so in `resume`
+ * instead. */
 const CUT_OFF_ASSESSMENT =
   /^(Application restarted during assessment|Live assessment connection unavailable|Assessment unresolved: (TypeError: (Failed to fetch|Load failed|NetworkError)|Error: The study bridge is not running|Error: Study bridge unavailable|Error: The reply ended before its answer arrived))/;
 

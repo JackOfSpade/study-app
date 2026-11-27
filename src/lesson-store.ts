@@ -15,7 +15,7 @@
  * `connect` below.
  */
 import { normalizeLesson } from "../scripts/lib/lesson-schema.mjs";
-import { fnv1a } from "./hash";
+import { openEnvelope, sealEnvelope } from "./hash";
 import type { LessonMessage, LessonRecord } from "./lesson-types";
 import { isRecord } from "./records";
 
@@ -41,12 +41,6 @@ export const LESSON_STORE_LIMITS = {
 /** A lesson record plus the one extra field the tutor chat needs after a
  * reload: the gap's description. Assignable to `LessonRecord`. */
 export type LessonEntry = LessonRecord & { gapDescription?: string };
-
-interface Envelope {
-  schema: 1;
-  payload: string;
-  checksum: number;
-}
 
 const STATES = ["pending", "ready", "failed", "interrupted"];
 const SECTION_ID = /^[a-z][a-z0-9-]{0,31}$/;
@@ -176,27 +170,17 @@ export function validLessonRecord(value: unknown): LessonEntry | undefined {
 }
 
 function encode(record: LessonEntry) {
-  const payload = JSON.stringify(record);
-  return JSON.stringify({
-    schema: 1,
-    payload,
-    checksum: fnv1a(payload),
-  } satisfies Envelope);
+  return sealEnvelope(JSON.stringify(record));
 }
 
 /** Null for any value that is not a sound record. Never throws. */
 function decode(value: unknown): LessonEntry | undefined {
   if (typeof value !== "string") return undefined;
   try {
-    const e = JSON.parse(value) as Envelope;
-    if (
-      !isRecord(e) ||
-      e.schema !== 1 ||
-      typeof e.payload !== "string" ||
-      fnv1a(e.payload) !== e.checksum
-    )
-      return undefined;
-    return validLessonRecord(JSON.parse(e.payload));
+    const payload = openEnvelope(value);
+    return payload === undefined
+      ? undefined
+      : validLessonRecord(JSON.parse(payload));
   } catch {
     return undefined;
   }

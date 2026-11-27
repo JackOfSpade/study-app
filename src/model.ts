@@ -1,12 +1,43 @@
-import type { LearnerLedger, ScopeDefinition } from "./learning-model";
+import type { BrowserStep } from "../scripts/browser-runner/spec.mjs";
+import type { DeclaredHelp } from "../scripts/lib/help-gate.mjs";
+import type { EnvironmentObservation } from "./environment-observations";
+import type { EnvironmentReviewJob } from "./environment-review";
+import type { WorkspaceExecution } from "./execution";
+import type {
+  KnowledgeEstablishedRecord,
+  KnowledgeGapRecord,
+  KnowledgeProbe,
+} from "./knowledge-probe";
+import type {
+  HistoricalFacetMapping,
+  LearnerLedger,
+  ReviewRecord,
+  ScopeDefinition,
+} from "./learning-model";
+import type {
+  RoadmapAdoptionBackup,
+  RoadmapReconciliationJob,
+} from "./roadmap-adoption-types";
+import type { RoadmapExport } from "./roadmap-export";
+import type { IdentifierCounters } from "./roadmap-identifiers";
+import type { TopicAssessmentRecord } from "./topic-assessment";
 export type Track = "PY" | "PE";
-/** A connected AI provider; development practice has no provider. */
-export type Provider = "study-mode" | "chatgpt-handoff" | "claude-cli";
-export const PROVIDERS: readonly string[] = [
+/** Every connected AI provider; development practice has no provider. */
+export const PROVIDERS = [
   "study-mode",
   "chatgpt-handoff",
   "claude-cli",
-];
+] as const;
+/** A connected AI provider; development practice has no provider. */
+export type Provider = (typeof PROVIDERS)[number];
+export function isProvider(value: unknown): value is Provider {
+  return (PROVIDERS as readonly unknown[]).includes(value);
+}
+/** A provider request saved verbatim, so a retry sends exactly the same one. */
+export interface SavedRequest {
+  provider: Provider;
+  payloadJson: string;
+}
 export interface Objective {
   id: string;
   target: number;
@@ -20,8 +51,8 @@ export interface Roadmap {
   resume?: {
     ratioPosition?: number;
     issues: string[];
-    reviews?: Record<string, import("./learning-model").ReviewRecord>;
-    identifierCounters?: import("./roadmap-identifiers").IdentifierCounters;
+    reviews?: Record<string, ReviewRecord>;
+    identifierCounters?: IdentifierCounters;
   };
   documentId: string;
   revision: number;
@@ -51,10 +82,10 @@ export interface Roadmap {
   >;
 }
 export interface Contract {
-  /** Legacy objectiveIds also carries track-qualified topic/integration IDs for final work. */
   kind?: "checkpoint" | "transfer" | "integration";
   id: string;
   track: Track;
+  /** Legacy objectiveIds also carries track-qualified topic/integration IDs for final work. */
   objectiveIds: string[];
   scopes: string[];
   depth: number;
@@ -86,19 +117,16 @@ export interface Contract {
 }
 export interface StudyState {
   /** Free-form AI impressions; separate from verified curriculum credit. */
-  topicAssessments?: Record<
-    string,
-    import("./topic-assessment").TopicAssessmentRecord
-  >;
-  roadmapReconciliations?: import("./roadmap-adoption-types").RoadmapReconciliationJob[];
-  roadmapAdoptionBackups?: import("./roadmap-adoption-types").RoadmapAdoptionBackup[];
-  environmentReviews?: import("./environment-review").EnvironmentReviewJob[];
-  environmentObservations?: import("./environment-observations").EnvironmentObservation[];
-  roadmapExport?: import("./roadmap-export").RoadmapExport;
+  topicAssessments?: Record<string, TopicAssessmentRecord>;
+  roadmapReconciliations?: RoadmapReconciliationJob[];
+  roadmapAdoptionBackups?: RoadmapAdoptionBackup[];
+  environmentReviews?: EnvironmentReviewJob[];
+  environmentObservations?: EnvironmentObservation[];
+  roadmapExport?: RoadmapExport;
   /** Learner-declared gaps conceded in conversation; never mastery. */
-  knowledgeGaps?: import("./knowledge-probe").KnowledgeGapRecord[];
+  knowledgeGaps?: KnowledgeGapRecord[];
   /** Facets established in conversation (answered or implied); never mastery. */
-  knowledgeEstablished?: import("./knowledge-probe").KnowledgeEstablishedRecord[];
+  knowledgeEstablished?: KnowledgeEstablishedRecord[];
   profile?: "development" | "live";
   careerFocus?: "product-feature-owner" | "full";
   learner?: LearnerLedger;
@@ -130,8 +158,8 @@ export interface Finding {
 }
 export interface Assessment {
   /** Immutable provider request retained until an explicit retry succeeds. */
-  request?: { provider: Provider; payloadJson: string };
-  historicalMappings?: import("./learning-model").HistoricalFacetMapping[];
+  request?: SavedRequest;
+  historicalMappings?: HistoricalFacetMapping[];
   id: string;
   encounter: string;
   sourceVersion: number;
@@ -192,7 +220,7 @@ export interface Artifact {
 }
 export interface Message {
   /** A tutor reply's own declaration: facets it supplied help for, and facets it offered help on. */
-  help?: import("../scripts/lib/help-gate.mjs").DeclaredHelp;
+  help?: DeclaredHelp;
   /** On a learner message sent with the hint button: the offered facets they accepted a hint on. */
   accepts?: string[];
   sourceRefs?: number[];
@@ -209,10 +237,7 @@ export interface Message {
 export interface Submission {
   dialogueRequestId?: string;
   /** The saved request of the retired answer check. Carried, never sent. */
-  completionRequest?: {
-    provider: Provider;
-    payloadJson: string;
-  };
+  completionRequest?: SavedRequest;
   id: string;
   revision: number;
   author: string;
@@ -230,7 +255,7 @@ export interface Problem {
   runtime?: {
     language: "python" | "typescript";
     environment?: "react";
-    steps?: import("../scripts/browser-runner/spec.mjs").BrowserStep[];
+    steps?: BrowserStep[];
   };
   title: string;
   prompt: string;
@@ -244,10 +269,8 @@ export interface Problem {
    * and each ask in order. `prompt` still holds the whole question. */
   staged?: { shared: string; parts: string[] };
 }
-export interface TutorRequest {
+export interface TutorRequest extends SavedRequest {
   id: string;
-  provider: Provider;
-  payloadJson: string;
   questionSequence: number;
   state: "pending" | "interrupted" | "applied" | "superseded";
   error?: string;
@@ -261,13 +284,11 @@ export interface TutorRequest {
 }
 /** A question session the retired ChatGPT chat once ran. Saves still carry it,
  * so learning history reads it; nothing creates or continues one any more. */
-export interface DirectStudySession {
+export interface DirectStudySession extends SavedRequest {
   id: string;
   createdAt?: number;
   responseReceivedAt?: number;
   appliedAt?: number;
-  provider: Provider;
-  payloadJson: string;
   questionFingerprint: string;
   state: "pending" | "interrupted" | "paused" | "applied" | "superseded";
   responseDigest?: string;
@@ -290,8 +311,8 @@ export interface Encounter {
    * not opened the next one yet. */
   partReady?: number;
   /** Knowledge probe: facets, per-turn findings and answer signals. */
-  probe?: import("./knowledge-probe").KnowledgeProbe;
-  executions?: import("./execution").WorkspaceExecution[];
+  probe?: KnowledgeProbe;
+  executions?: WorkspaceExecution[];
   runId?: string;
   problemPresentedSequence?: number;
   /** Wall-clock time the problem was first presented; orders topic assessments. */

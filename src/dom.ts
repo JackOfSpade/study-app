@@ -26,3 +26,17 @@ export function setHtml(el: Element, html: string): boolean {
   el.innerHTML = html;
   return true;
 }
+
+/** Offer text as a file download. The object URL outlives the click long
+ * enough for a slow browser (Safari) to start a large download. */
+export function download(
+  name: string,
+  text: string,
+  type = "application/json",
+) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], { type }));
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+}

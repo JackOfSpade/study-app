@@ -1,8 +1,10 @@
 import { displayScale } from "./display-scale";
 import { createCheckpointQueue } from "./checkpoint-queue";
-import { fnv1a } from "./hash";
+import { openEnvelope, sealEnvelope } from "./hash";
 import { reconcileKnowledgeGaps } from "./knowledge-probe";
 import { type StudyRecord } from "./model";
+import { isRecord } from "./records";
+import { RESTARTED_ASSESSMENT, RESTARTED_TUTOR } from "./resume-work";
 import {
   closeDirectStudy,
   recoverDirectStudy,
@@ -24,31 +26,16 @@ const KEY = "study-save-v1";
  * at least as new is safely written under the new names (see AGENTS.md).
  */
 const LEGACY_KEY = "dead-air-save-v1";
-interface Envelope {
-  schema: 1;
-  payload: string;
-  checksum: number;
-}
 /** Saves written by earlier builds hold more fields than `StudyRecord` declares
  * (legacy simulation state). They are neither read nor validated and are
  * written back unchanged. */
 export function encode(g: StudyRecord) {
-  const payload = JSON.stringify(g);
-  return JSON.stringify({
-    schema: 1,
-    payload,
-    checksum: fnv1a(payload),
-  } satisfies Envelope);
+  return sealEnvelope(JSON.stringify(g));
 }
 export function decode(text: string): StudyRecord {
-  const e = JSON.parse(text) as Envelope;
-  if (
-    e.schema !== 1 ||
-    typeof e.payload !== "string" ||
-    fnv1a(e.payload) !== e.checksum
-  )
-    throw Error("Save integrity check failed");
-  const g = JSON.parse(e.payload) as StudyRecord;
+  const payload = openEnvelope(text);
+  if (payload === undefined) throw Error("Save integrity check failed");
+  const g = JSON.parse(payload) as StudyRecord;
   if (
     !g ||
     g.schema !== 1 ||
@@ -160,10 +147,10 @@ interface StoredSave {
   data: string;
 }
 function unpack(raw: string) {
-  const parsed = JSON.parse(raw);
+  const parsed: unknown = JSON.parse(raw);
   const stored =
-    parsed.format === 2
-      ? (parsed as StoredSave)
+    isRecord(parsed) && parsed.format === 2
+      ? (parsed as unknown as StoredSave)
       : { format: 2, serial: 0, data: raw };
   if (
     !Number.isSafeInteger(stored.serial) ||
@@ -216,10 +203,13 @@ async function attempt(read: () => string | null | Promise<string | null>) {
   }
 }
 async function storedCopies() {
-  const durable = await attempt(() => readCurrentDurable(KEY)),
-    local = await attempt(() => localStorage.getItem(KEY)),
-    legacyDurable = await attempt(() => readLegacyDurable(LEGACY_KEY)),
-    legacyLocal = await attempt(() => localStorage.getItem(LEGACY_KEY));
+  // Independent reads: the legacy database opens alongside the current one.
+  const [durable, local, legacyDurable, legacyLocal] = await Promise.all([
+    attempt(() => readCurrentDurable(KEY)),
+    attempt(() => localStorage.getItem(KEY)),
+    attempt(() => readLegacyDurable(LEGACY_KEY)),
+    attempt(() => localStorage.getItem(LEGACY_KEY)),
+  ]);
   return {
     durable: durable.raw,
     local: local.raw,
@@ -248,7 +238,7 @@ export async function exportRecoveryBackup() {
   );
 }
 /** A stored copy that failed validation while the other copy loaded. */
-export interface RejectedCopy {
+interface RejectedCopy {
   store: "durable" | "local" | "legacy-durable" | "legacy-local";
   /** The stored bytes exactly as they were read. */
   raw: string;
@@ -322,17 +312,6 @@ export async function load() {
 export function flushSaves() {
   return checkpoints.flush();
 }
-export function download(
-  name: string,
-  text: string,
-  type = "application/json",
-) {
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob([text], { type }));
-  a.download = name;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-}
 function interruptPending(
   jobs: { state?: string; status?: string; error?: string }[] | undefined,
   message: string,
@@ -363,18 +342,17 @@ export function recover(g: StudyRecord) {
   if (g.study.pending && !g.study.pending.encounter.includes("/"))
     g.study.pending.encounter = `${g.id}/${g.study.pending.encounter}`;
   for (const e of Object.values(g.encounters)) e.runId ??= g.id;
+  const archived = new Set(g.study.archives);
   for (const e of new Set([
     ...Object.values(g.encounters),
     ...g.study.archives,
   ])) {
     e.chatOpen = false;
-    interruptPending(
-      e.tutorRequests,
-      "Application restarted; retry the exact saved private question.",
-    );
+    // resume-work.ts resends a request carrying exactly this note.
+    interruptPending(e.tutorRequests, RESTARTED_TUTOR);
     // Older saves could carry a previous run's open question into a fresh run.
     // Preserve its artifacts while removing the obsolete completion obligation.
-    if (g.study.archives.includes(e)) closeDirectStudy(e);
+    if (archived.has(e)) closeDirectStudy(e);
     recoverDirectStudy(e);
     delete e.generation;
     for (const s of e.submissions)
@@ -396,8 +374,7 @@ export function recover(g: StudyRecord) {
   for (const a of g.study.assessments)
     if (a.status === "pending") {
       a.status = "review-required";
-      a.provenance =
-        "Application restarted during assessment. Evidence cutoff and request identity retained for retry.";
+      a.provenance = RESTARTED_ASSESSMENT;
     }
   reconcileKnowledgeGaps(g);
   return g;

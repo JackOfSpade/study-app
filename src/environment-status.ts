@@ -1,4 +1,4 @@
-import { PROVIDERS } from "./model";
+import { isProvider } from "./model";
 import type { EnvironmentObservation } from "./environment-observations";
 import type { FinalRequirement } from "./final-requirements";
 import { importedEnvironmentStatus } from "./imported-proof";
@@ -61,7 +61,7 @@ export function validateEnvironmentEvidence(
     j = v.judgment,
     o = p.observation;
   if (
-    !PROVIDERS.includes(v.provenance) ||
+    !isProvider(v.provenance) ||
     v.provenance !== (p.provider ?? "study-mode") ||
     !/^[a-f0-9]{64}$/.test(v.requestHash) ||
     !/^[a-f0-9]{64}$/.test(v.judgmentHash) ||

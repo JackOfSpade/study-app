@@ -11,7 +11,7 @@ import {
   status,
 } from "./ai";
 import { eligible } from "./curriculum";
-import { $, setNodeText, setText } from "./dom";
+import { $, download, setNodeText, setText } from "./dom";
 import { renderEnvironmentObservations } from "./environment-ui";
 import { historicalRecords } from "./historical-proof";
 import { escapeHtml as escape } from "./html";
@@ -22,7 +22,6 @@ import {
 } from "./inspector-view";
 import { encounterKey } from "./learner";
 import type { StudyRecord, Provider, Roadmap } from "./model";
-import { download } from "./persistence";
 import { renderRoadmapAdoption } from "./roadmap-adoption-ui";
 import { prepareRoadmapExport } from "./roadmap-export";
 import { presentRoadmapReview } from "./roadmap-exposure";

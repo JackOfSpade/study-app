@@ -1,4 +1,4 @@
-import { PROVIDERS } from "./model";
+import { isProvider } from "./model";
 import { sha256 } from "./digest";
 import type { LearnerLedger, LearningAttempt } from "./learning-model";
 import type { Encounter, StudyRecord } from "./model";
@@ -128,7 +128,7 @@ export function externalResolutionRow(l: LearnerLedger, a: LearningAttempt) {
     !receipt ||
     !declaration ||
     receipt.sourceHash !== l.sourceHash ||
-    !PROVIDERS.includes(receipt.provenance) ||
+    !isProvider(receipt.provenance) ||
     receipt.id !== receipt.proposal.requestId ||
     !Number.isFinite(Date.parse(v.at)) ||
     !Number.isInteger(v.humanCutoff) ||

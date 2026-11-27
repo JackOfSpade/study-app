@@ -9,7 +9,7 @@ import {
   finalRequirementStatus,
 } from "./final-requirements";
 import type { StudyRecord, Roadmap } from "./model";
-import { download } from "./persistence";
+import { download } from "./dom";
 const refreshers = new WeakMap<HTMLElement, () => void>();
 export function renderEnvironmentObservations(
   host: HTMLElement,

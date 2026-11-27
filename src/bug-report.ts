@@ -3,6 +3,7 @@
  * computer's service logs and writes one Markdown file. "Copy to clipboard"
  * copies that file's path and the learner's own words, never the report body. */
 
+import { download } from "./dom";
 import { isRecord } from "./records";
 
 interface BugReportQuestion {
@@ -209,15 +210,12 @@ async function send(
   return body;
 }
 
-function download(markdown: string) {
-  const url = URL.createObjectURL(
-    new Blob([markdown], { type: "text/markdown" }),
+function downloadReport(markdown: string) {
+  download(
+    `bug-report-${new Date().toISOString().replace(/[:.]/g, "-")}.md`,
+    markdown,
+    "text/markdown",
   );
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `bug-report-${new Date().toISOString().replace(/[:.]/g, "-")}.md`;
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
 /** Wire the toolbar button and its dialog, both already in the page. */
@@ -271,7 +269,9 @@ export function mountBugReport({ collect, log }: Wiring) {
           outcome = "saved-clipboard-failed";
         }
       } else {
-        download(String((await send("render", description, client)).markdown));
+        downloadReport(
+          String((await send("render", description, client)).markdown),
+        );
         say("The report was downloaded.", "ok");
         outcome = "downloaded";
       }
@@ -290,7 +290,7 @@ export function mountBugReport({ collect, log }: Wiring) {
       try {
         if (!client) throw error;
         if (mode === "file") {
-          download(fallback);
+          downloadReport(fallback);
           say(
             `The study bridge did not answer (${reason}), so the downloaded report has the browser's diagnostics only.`,
             "error",
@@ -300,7 +300,7 @@ export function mountBugReport({ collect, log }: Wiring) {
             .writeText(fallback)
             .then(() => true)
             .catch(() => false);
-          if (!copied) download(fallback);
+          if (!copied) downloadReport(fallback);
           say(
             `The report file could not be saved (${reason}), so the browser's diagnostics were ${copied ? "copied to the clipboard" : "downloaded"} instead.`,
             "error",

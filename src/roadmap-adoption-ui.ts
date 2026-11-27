@@ -1,6 +1,6 @@
 import { escapeHtml as escape } from "./html";
 import type { Provider, StudyRecord, Roadmap } from "./model";
-import { download } from "./persistence";
+import { download } from "./dom";
 import { adoptReconciledRoadmap } from "./roadmap-adoption";
 import type { RoadmapReconciliation } from "./roadmap-adoption-types";
 import { presentRoadmapReview } from "./roadmap-exposure";

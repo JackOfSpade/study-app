@@ -25,7 +25,7 @@ import {
 import { connectionSteps } from "./connection-steps";
 import { initialStudy, syncLearningView } from "./curriculum";
 import { displayScale } from "./display-scale";
-import { $, setHtml, setNodeText, setText } from "./dom";
+import { $, download, setHtml, setNodeText, setText } from "./dom";
 import { executionText } from "./execution-presentation";
 import studyShell from "./study-shell.html?raw";
 import { escapeHtml as escape } from "./html";
@@ -40,7 +40,6 @@ import { nextPartReady, openPart, questionHtml } from "./question-parts";
 import type { Encounter, StudyRecord, Roadmap } from "./model";
 import {
   decode,
-  download,
   encode,
   exportRecoveryBackup,
   load,
