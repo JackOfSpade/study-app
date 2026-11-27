@@ -210,13 +210,13 @@ async function send(
   return body;
 }
 
-function downloadReport(markdown: string) {
+/** Saves the report as a timestamped Markdown file. */
+const downloadReport = (markdown: string) =>
   download(
     `bug-report-${new Date().toISOString().replace(/[:.]/g, "-")}.md`,
     markdown,
     "text/markdown",
   );
-}
 
 /** Wire the toolbar button and its dialog, both already in the page. */
 export function mountBugReport({ collect, log }: Wiring) {

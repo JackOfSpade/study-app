@@ -20,12 +20,13 @@ import {
   knowledgeHtml,
   readinessHtml,
 } from "./inspector-view";
-import { encounterKey } from "./learner";
-import type { StudyRecord, Provider, Roadmap } from "./model";
+import type { StudyRecord, Roadmap } from "./model";
+import { providerForMode } from "./provider-label";
 import { renderRoadmapAdoption } from "./roadmap-adoption-ui";
 import { prepareRoadmapExport } from "./roadmap-export";
 import { presentRoadmapReview } from "./roadmap-exposure";
 import { reviewRoadmap } from "./roadmap-review";
+import { questionForAssessment } from "./study-workspace";
 
 interface InspectorHost {
   /** The current record: an import replaces it. */
@@ -43,11 +44,11 @@ interface InspectorHost {
 /** Returns the function that rebuilds the inspector from the current record. */
 export function createInspector(host: InspectorHost) {
   const { roadmap } = host;
+  /** The curriculum's eligible work, or nothing while a gate refuses it. */
   function eligibleNow() {
     try {
       return eligible(roadmap, host.studyRecord().study);
-    } catch (err) {
-      host.studyRecord().notice = `Curriculum gate: ${String(err)}`;
+    } catch {
       return undefined;
     }
   }
@@ -100,10 +101,7 @@ export function createInspector(host: InspectorHost) {
         getRecord: () => host.studyRecord(),
         r: roadmap,
         candidate,
-        provider:
-          status().mode === "development"
-            ? "study-mode"
-            : (status().mode as Provider),
+        provider: providerForMode(status().mode),
         persist: host.persistOrThrow,
         reconcile:
           host.studyRecord().study.profile === "live" &&
@@ -157,7 +155,7 @@ export function createInspector(host: InspectorHost) {
         const report = await reviewRoadmap(roadmap, local, candidate);
         if (host.studyRecord() !== requestRecord)
           throw Error(
-            "Run changed during review; reopen the inspector to review current progress",
+            "Your progress changed during review; reopen the inspector to review current progress",
           );
         renderAdoption(
           report.ancestry === "identical" ||
@@ -226,12 +224,16 @@ export function createInspector(host: InspectorHost) {
         const a = host
           .studyRecord()
           .study.assessments.find((a) => a.id === button.dataset.assessment);
-        if (!a) return;
-        const e = [
-          ...Object.values(host.studyRecord().encounters),
-          ...host.studyRecord().study.archives,
-        ].find((e) => a.id.startsWith(`assessment-${encounterKey(e)}-`));
-        if (!e || button.disabled) return;
+        if (!a || button.disabled) return;
+        const e = questionForAssessment(host.studyRecord(), a);
+        if (!e) {
+          button.disabled = true;
+          setNodeText(
+            button,
+            "Question for this assessment is no longer saved",
+          );
+          return;
+        }
         button.disabled = true;
         const requestRecord = host.studyRecord(),
           // A stale status would fail the retry before it reached the relay.
@@ -269,7 +271,7 @@ export function createInspector(host: InspectorHost) {
           host.studyRecord().study.roadmapExport,
         );
         if (host.studyRecord() !== requestRecord)
-          throw Error("Run changed during export; retry from the current run");
+          throw Error("Your progress changed during export; retry");
         host.studyRecord().study.roadmapExport = prepared;
         await host.persist();
         download(

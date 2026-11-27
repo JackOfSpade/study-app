@@ -200,7 +200,7 @@ test("failed diagnostic writes surface an error and the next flush retries with 
   await logs.flush();
   assert.equal(
     logs.error,
-    "Diagnostics could not be saved. Download them before closing.",
+    "Diagnostics could not be saved. File a bug report before closing to keep them.",
   );
   assert.equal(writes.length, 0);
   fail = false;

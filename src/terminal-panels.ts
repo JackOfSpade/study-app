@@ -23,17 +23,32 @@ const TUTOR = "Tutor";
 export const speakerLabel = (author: string) =>
   author === "Terminal AI" ? TUTOR : author;
 
+/** Rendered bubbles by kind, name and text. The conversation is rebuilt on
+ * every UI tick, and parsing each message's markdown again is the costly part
+ * of that; a bubble is a pure function of these three strings. */
+const bubbles = new Map<string, string>();
+const BUBBLE_CACHE_LIMIT = 500;
+
 /** One chat bubble: the speaker's name as plain text and the message as
  * markdown, which markdownToHtml escapes. Shared by the question's
  * conversation and the lesson's tutor chat. */
 export function messageBubble(kind: string, name: string, text: string) {
-  return `<div class="message ${escape(kind)}"><strong>${escape(name)}</strong><div class="message-body">${markdownToHtml(text)}</div></div>`;
+  const key = `${kind}\u0000${name}\u0000${text}`;
+  let html = bubbles.get(key);
+  if (html === undefined) {
+    html = `<div class="message ${escape(kind)}"><strong>${escape(name)}</strong><div class="message-body">${markdownToHtml(text)}</div></div>`;
+    if (bubbles.size >= BUBBLE_CACHE_LIMIT) bubbles.clear();
+    bubbles.set(key, html);
+  }
+  return html;
 }
 
 interface TerminalPanelHost {
   /** The current record: an import replaces it. */
   studyRecord(): StudyRecord;
   roadmap: Roadmap;
+  /** The question open in the terminal, looked up when a button is used. */
+  openEncounter(): Encounter | undefined;
   persist(): unknown;
   /** Re-render whichever terminal is open. */
   render(): void;
@@ -122,9 +137,49 @@ export function gapClosedMarker(
 
 export function createTerminalPanels(host: TerminalPanelHost) {
   const { roadmap } = host;
+  const statusBox = $("#tutor-request-status");
+  const conversation = $("#messages");
+  const announcer = $("#tutor-announce");
+  // The buttons below are bound once and act on the question open when they
+  // are used: unchanged markup is not rewritten, so a handler bound at render
+  // time could outlive the question it was written for (after an import).
+  statusBox.addEventListener("click", (event) => {
+    const button =
+      event.target instanceof Element
+        ? event.target.closest<HTMLButtonElement>("[data-question-retry]")
+        : null;
+    const e = host.openEncounter();
+    if (!button || !e) return;
+    host.settle(
+      retryTutorRequest(
+        host.studyRecord(),
+        e,
+        button.dataset.questionRetry!,
+        roadmap,
+      ),
+      e,
+    );
+    host.persist();
+    host.render();
+  });
+  conversation.addEventListener("click", (event) => {
+    const button =
+      event.target instanceof Element
+        ? event.target.closest("[data-next-part]")
+        : null;
+    const e = host.openEncounter();
+    if (!button || !e || !advancePart(e)) return;
+    // A request interrupted on the part just left is not retried on the next.
+    supersedeInterrupted(e);
+    delete e.error;
+    host.persist();
+    host.render();
+    $<HTMLTextAreaElement>("#chat-input").focus();
+  });
+
   /** Saved questions that are waiting or were interrupted. */
   function requestStatus(e: Encounter) {
-    const box = $("#tutor-request-status");
+    const box = statusBox;
     const saved = e.tutorRequests ?? [];
     const open = saved.filter(
       (j) => j.state !== "applied" && j.state !== "superseded",
@@ -145,17 +200,14 @@ export function createTerminalPanels(host: TerminalPanelHost) {
             }${j.state === "interrupted" ? `<button class="quiet" data-question-retry="${escape(j.id)}">Retry saved question</button>` : ""}</p>`,
         )
         .join("");
-    if (!setHtml(box, html)) return;
-    for (const button of box.querySelectorAll<HTMLButtonElement>(
-      "[data-question-retry]",
-    ))
-      button.onclick = () => {
-        const id = button.dataset.questionRetry!;
-        host.settle(retryTutorRequest(host.studyRecord(), e, id, roadmap), e);
-        host.persist();
-        host.render();
-      };
+    setHtml(box, html);
   }
+
+  // What the conversation last showed, so that it follows new messages
+  // without pulling a learner who scrolled up back down, and announces a
+  // reply once instead of re-reading the whole conversation.
+  let shownEncounter: string | undefined;
+  let shownMessages = 0;
 
   /** The conversation, then a reply still arriving. */
   function messages(e: Encounter) {
@@ -185,20 +237,28 @@ export function createTerminalPanels(host: TerminalPanelHost) {
         .filter((text): text is string => !!text)
         .map((text) => messageBubble("tutor", TUTOR, text))
         .join("");
-    const box = $("#messages");
-    if (!setHtml(box, html)) return;
-    box.scrollTop = box.scrollHeight;
-    const next = box.querySelector<HTMLButtonElement>("[data-next-part]");
-    if (next)
-      next.onclick = () => {
-        if (!advancePart(e)) return;
-        // A request interrupted on the part just left is not retried on the next.
-        supersedeInterrupted(e);
-        delete e.error;
-        host.persist();
-        host.render();
-        $<HTMLTextAreaElement>("#chat-input").focus();
-      };
+    const box = conversation;
+    const opened = e.id !== shownEncounter;
+    const added = opened ? [] : e.tutor.slice(shownMessages);
+    shownEncounter = e.id;
+    shownMessages = e.tutor.length;
+    const stick =
+      opened ||
+      added.some((m) => m.author === "human") ||
+      box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+    if (added.some((m) => m.kind === "tutor")) announce("Tutor replied.");
+    if (setHtml(box, html) && stick) box.scrollTop = box.scrollHeight;
+  }
+
+  /** Says a short line to assistive technology once. The conversation itself
+   * is rewritten as a reply streams, so it is not a live region. */
+  function announce(text: string) {
+    announcer.textContent = "";
+    // A changed text is what a live region announces; clearing first lets the
+    // same line be announced again for the next reply.
+    requestAnimationFrame(() => {
+      announcer.textContent = text;
+    });
   }
 
   return { requestStatus, messages };

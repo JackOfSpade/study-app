@@ -387,7 +387,7 @@ for (const scenario of ["unchanged", "stale", "new-work"])
       .click();
     // The click resolves before the async save; reloading earlier loses it.
     await expect(page.locator("#menu-save-status")).toContainText(
-      "Run saved locally",
+      "Progress saved locally",
     );
     await page.locator("#menu-close").click();
     await page.reload();

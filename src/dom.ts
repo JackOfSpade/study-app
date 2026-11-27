@@ -1,4 +1,4 @@
-/** Small DOM helpers shared by the application shell and its panels. */
+/** Small DOM and display helpers shared by the application shell and its panels. */
 
 /** The element a selector names. The shell's markup is static, so it exists. */
 export const $ = <T extends HTMLElement = HTMLElement>(selector: string) =>
@@ -27,16 +27,23 @@ export function setHtml(el: Element, html: string): boolean {
   return true;
 }
 
-/** Offer text as a file download. The object URL outlives the click long
- * enough for a slow browser (Safari) to start a large download. */
+/** Offers text as a file download. The object URL outlives the click long
+ * enough for a large backup to be read before it is revoked. */
 export function download(
   name: string,
   text: string,
   type = "application/json",
 ) {
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob([text], { type }));
-  a.download = name;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+/** Elapsed time as m:ss. */
+export function formatElapsed(ms: number): string {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }

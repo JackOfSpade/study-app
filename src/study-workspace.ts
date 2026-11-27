@@ -1,19 +1,13 @@
 import { studyMapHtml } from "./study-map";
 import { eligible, syncLearningView } from "./curriculum";
 import { encounterKey, interruptLearningAttempt } from "./learner";
-import type { Encounter, StudyRecord, Roadmap } from "./model";
+import type { Assessment, Encounter, StudyRecord, Roadmap } from "./model";
 
-/** Fields an earlier build required on every saved question. Nothing reads
- * them; they are kept so saves stay loadable by older builds. */
-const RETIRED_ENCOUNTER_FIELDS = {
-  floor: 0,
-  reward: "loot",
-  group: [],
-  chatCursor: 0,
-  recentSpeakers: [],
-  npcProgress: 0,
-  loot: [],
-};
+/** Every saved question, open or archived. */
+const savedQuestions = (g: StudyRecord) => [
+  ...Object.values(g.encounters),
+  ...g.study.archives,
+];
 
 export function enterStudyWorkspace(g: StudyRecord) {
   if (!g.studyWorkspace?.enabled)
@@ -79,7 +73,7 @@ export function nextWorkspaceQuestion(
         .map((a) => a.encounter),
     );
     let interrupted = false;
-    for (const e of [...Object.values(g.encounters), ...g.study.archives])
+    for (const e of savedQuestions(g))
       if (
         unfinished.has(encounterKey(e)) &&
         e.state === "consumed" &&
@@ -141,7 +135,6 @@ function newWorkspaceEncounter(g: StudyRecord): Encounter {
     chatOpen: false,
     scroll: 0,
     selection: [0, 0],
-    ...RETIRED_ENCOUNTER_FIELDS,
   };
   g.encounters[id] = e;
   g.studyWorkspace!.encounter = encounterKey(e);
@@ -154,30 +147,42 @@ export function workspaceAssessment(g: StudyRecord) {
   return e ? assessmentForQuestion(g, e) : undefined;
 }
 
-function assessmentForQuestion(g: StudyRecord, e: Encounter) {
-  const prefix = `assessment-${encounterKey(e)}-`;
-  // Legacy assessment IDs are safe only when their unscoped encounter ID is
-  // unambiguous. Older saves reused question IDs across their runs.
-  const unambiguous = [
-    ...Object.values(g.encounters),
-    ...g.study.archives,
-  ].every(
-    (other) => other.id !== e.id || encounterKey(other) === encounterKey(e),
-  );
-  for (let i = g.study.assessments.length - 1; i >= 0; i--) {
-    const a = g.study.assessments[i];
-    if (
-      a.encounter === e.id &&
-      (a.id.startsWith(prefix) ||
-        (unambiguous && !a.id.startsWith("assessment-")))
+/** Whether an assessment was written for this question. Its ID is scoped to
+ * the question's key; a legacy unscoped ID is trusted only when the
+ * question's own ID is unambiguous, since older saves reused question IDs
+ * across their runs. */
+function assessesQuestion(
+  g: StudyRecord,
+  a: Assessment,
+  e: Encounter,
+): boolean {
+  if (a.encounter !== e.id) return false;
+  if (a.id.startsWith(`assessment-${encounterKey(e)}-`)) return true;
+  return (
+    !a.id.startsWith("assessment-") &&
+    savedQuestions(g).every(
+      (other) => other.id !== e.id || encounterKey(other) === encounterKey(e),
     )
-      return a;
-  }
+  );
+}
+
+function assessmentForQuestion(g: StudyRecord, e: Encounter) {
+  for (let i = g.study.assessments.length - 1; i >= 0; i--)
+    if (assessesQuestion(g, g.study.assessments[i], e))
+      return g.study.assessments[i];
   return undefined;
 }
 
+/** The saved question an assessment was written for, if it is still saved. */
+export function questionForAssessment(
+  g: StudyRecord,
+  a: Assessment,
+): Encounter | undefined {
+  return savedQuestions(g).find((e) => assessesQuestion(g, a, e));
+}
+
 export function workspaceSelectedQuestion(g: StudyRecord) {
-  return [...Object.values(g.encounters), ...g.study.archives].find(
+  return savedQuestions(g).find(
     (e) => encounterKey(e) === g.studyWorkspace?.encounter,
   );
 }
@@ -186,7 +191,7 @@ export function workspaceSelectedQuestion(g: StudyRecord) {
 export function workspaceProgressHtml(
   g: StudyRecord,
   roadmap: Roadmap,
+  open = workspaceQuestion(g),
 ): string {
-  const issued = workspaceQuestion(g)?.problem?.contract;
-  return studyMapHtml(g, roadmap, issued);
+  return studyMapHtml(g, roadmap, open?.problem?.contract);
 }
