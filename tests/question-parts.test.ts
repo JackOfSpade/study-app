@@ -253,6 +253,7 @@ test("real bridge: a generated question is staged, worked part by part, and fini
 test("a generated reply's parts become the stored staged question", async () => {
   const original = globalThis.fetch;
   let parts: unknown = ["FIRST ask", " SECOND ask "];
+  let partSolveSeconds: unknown = [120, 240];
   try {
     globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
       if (String(input) === "/api/status")
@@ -267,7 +268,8 @@ test("a generated reply's parts become the stored staged question", async () => 
         starter: "",
         rubric: ["fixture"],
         contract: c,
-        estimatedSolveSeconds: 120,
+        estimatedSolveSeconds: 2400,
+        partSolveSeconds,
         scopeDefinitions: c.objectiveIds.map((id: string, i: number) => ({
           id: `${id}/D${c.depth}`,
           objectiveId: id,
@@ -286,13 +288,19 @@ test("a generated reply's parts become the stored staged question", async () => 
     assert.deepEqual(e.problem!.staged, { shared: "SHARED facts.", parts: ["FIRST ask", "SECOND ask"] }); // prettier-ignore
     assert.match(e.problem!.prompt, /^SHARED facts\.\n\n\*\*Part 1 of 2\*\*\n\nFIRST ask/); // prettier-ignore
     assert.equal("parts" in e.problem!, false);
+    // A long question is kept; its per-part times are stored as measured.
+    assert.equal(e.problem!.estimatedSolveSeconds, 2400);
+    assert.deepEqual(e.problem!.partSolveSeconds, [120, 240]);
     // A discarded question starts its replacement at the first part.
     e.partsDone = [3];
     e.partReady = 9;
     assert.equal(regenerateQuestion(g, e, roadmap), true);
     assert.equal(e.partsDone, undefined);
     parts = ["Only ask"];
+    // A miscounted list is dropped, never a reason to refuse the question.
+    partSolveSeconds = [60, 60];
     await ensureProblem(g, e, roadmap);
+    assert.equal(e.problem!.partSolveSeconds, undefined);
     assert.equal(e.problem!.staged, undefined);
     assert.equal(e.problem!.prompt, "SHARED facts.\n\nOnly ask");
     regenerateQuestion(g, e, roadmap);

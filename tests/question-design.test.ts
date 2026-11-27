@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 // @ts-expect-error Direct .mjs contract test.
 import { taskInstructions, validateAnswer } from "../scripts/lib/ai-contracts.mjs"; // prettier-ignore
+import { PART_SOLVE_SECONDS_MAX } from "../scripts/lib/question-parts.mjs";
 import { checkBridge, ensureProblem, regenerateQuestion } from "../src/ai";
 import { eligible, initialStudy } from "../src/curriculum";
 import {
@@ -192,6 +193,7 @@ test("the relay accepts a contract copy that keeps what the app checks, and name
     rubric: ["Names the cost."],
     contract: copy,
     scopeDefinitions: [{ id: "s" }],
+    partSolveSeconds: [60],
   });
   validateAnswer(job, reply(contract));
   // The slips that cost a second generation on 2026-11-20: an optional key
@@ -225,10 +227,10 @@ test("the relay accepts a contract copy that keeps what the app checks, and name
   assert.throws(() => validateAnswer(job, reply("PY")), /contract differs/);
 });
 
-test("every generated question fits one sitting", () => {
+test("a question has no total time limit, but each part does", () => {
   const contract = { id: "synthetic-sitting", depth: 2 };
   const job = { operation: "generate", payload: { contract } };
-  const answer = (estimatedSolveSeconds: number) => ({
+  const answer = (estimatedSolveSeconds: number, partSolveSeconds = [60]) => ({
     title: "Late deliveries report",
     prompt: "Explain the bug.",
     starter: "",
@@ -236,19 +238,59 @@ test("every generated question fits one sitting", () => {
     contract,
     scopeDefinitions: [{ id: "s" }],
     estimatedSolveSeconds,
+    partSolveSeconds,
   });
-  assert.doesNotThrow(() => validateAnswer(job, answer(900)));
-  assert.throws(() => validateAnswer(job, answer(901)), /30 to 900/);
+  // A long problem is fine: it is worked in short parts.
+  const long = {
+    ...answer(3600, Array(12).fill(PART_SOLVE_SECONDS_MAX)),
+    parts: Array(12).fill("ask"),
+  };
+  assert.doesNotThrow(() => validateAnswer(job, long));
+  assert.throws(() => validateAnswer(job, answer(29)), /at least 30/);
+  // A short part is never worth a second generation.
+  assert.doesNotThrow(() => validateAnswer(job, answer(60, [10])));
   // The number of parts has no limit.
-  const parts = (n: number) => ({ ...answer(60), parts: Array(n).fill("ask") });
+  const parts = (n: number) => ({
+    ...answer(60, Array(n).fill(60)),
+    parts: Array(n).fill("ask"),
+  });
   assert.doesNotThrow(() => validateAnswer(job, parts(12)));
   assert.throws(() => validateAnswer(job, parts(0)), /one or more nonempty/);
+  // A part over the limit is sent back to be split into steps, and so is a
+  // missing or miscounted list, but never refused on the last try.
+  const over = { ...answer(900, [60, 600]), parts: ["Pick one.", "Build it."] };
+  assert.throws(
+    () => validateAnswer(job, over),
+    /parts\[1\] is estimated at 600 seconds.*cut any ask in it the skill does not need.*split what remains into consecutive steps.*one function, method or distinct piece of behaviour per part/,
+  );
+  assert.doesNotThrow(() => validateAnswer(job, over, { final: true }));
+  const miscounted = { ...answer(120, [60]), parts: ["Pick one.", "Why?"] };
+  assert.throws(
+    () => validateAnswer(job, miscounted),
+    /partSolveSeconds, an array of 2 numbers/,
+  );
+  const { partSolveSeconds: _, ...missing } = answer(60);
+  assert.throws(() => validateAnswer(job, missing), /Return partSolveSeconds/);
+  assert.doesNotThrow(() => validateAnswer(job, missing, { final: true }));
   // A part with two requests is sent back once, never refused on the last try.
   const two = { ...answer(60), parts: ["Which would you use? Give its cost."] };
   assert.throws(() => validateAnswer(job, two), /more than one thing/);
   assert.doesNotThrow(() => validateAnswer(job, two, { final: true }));
+  // Both reasons go in the one correction.
+  assert.throws(
+    () => validateAnswer(job, { ...two, partSolveSeconds: [900] }),
+    /more than one thing.*parts\[0\] is estimated at 900 seconds/s,
+  );
   const instructions = taskInstructions("generate", { contract }) as string;
-  assert.match(instructions, /one sitting of at most 15 minutes/);
+  assert.doesNotMatch(instructions, /15 minutes|one sitting/);
+  assert.match(instructions, /The whole question has no time limit/);
+  assert.match(instructions, /at most 5 minutes each/);
+  assert.match(
+    instructions,
+    /a long implementation is built over several parts, one function, method or distinct piece of behaviour per part/,
+  );
+  assert.match(instructions, /states that result in one short line/);
+  assert.match(instructions, /continue with the approach they chose/);
   for (const op of ["generate", "tutor", "assess"])
     assert.doesNotMatch(
       taskInstructions(op, { contract }) as string,

@@ -23,6 +23,7 @@ const METRICS = [
   "rubricLineWordsMax",
   "facetCount",
   "estimatedSolveSeconds",
+  "partSolveSecondsMax",
 ];
 
 const words = (text) => text.split(/\s+/).filter(Boolean).length;
@@ -104,6 +105,14 @@ export function questionMetrics(problem) {
     estimatedSolveSeconds: isNumber(problem?.estimatedSolveSeconds)
       ? problem.estimatedSolveSeconds
       : null,
+    // The longest single part: what a wrong turn can cost before the tutor
+    // catches it.
+    partSolveSecondsMax:
+      Array.isArray(problem?.partSolveSeconds) &&
+      problem.partSolveSeconds.length &&
+      problem.partSolveSeconds.every(isNumber)
+        ? Math.max(...problem.partSolveSeconds)
+        : null,
   };
 }
 

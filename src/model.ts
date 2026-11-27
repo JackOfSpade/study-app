@@ -225,6 +225,8 @@ export interface Problem {
   /** Generation-time seconds a learner who already has the skill needs for one
    * complete correct answer; pacing metadata only, nothing schedules from it. */
   estimatedSolveSeconds?: number;
+  /** One estimate per part, in order (one entry for a question shown whole). */
+  partSolveSeconds?: number[];
   runtime?: {
     language: "python" | "typescript";
     environment?: "react";

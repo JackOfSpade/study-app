@@ -69,6 +69,12 @@ test("a problem with no parts", () => {
   assert.equal(m.facetCount, 3);
   assert.equal(m.estimatedSolveSeconds, 90);
   assert.equal(questionMetrics({ title: "t", prompt: "x" }).estimatedSolveSeconds, null); // prettier-ignore
+  assert.equal(m.partSolveSecondsMax, null);
+  assert.equal(
+    questionMetrics({ prompt: "x", partSolveSeconds: [60, 240, 120] })
+      .partSolveSecondsMax,
+    240,
+  );
 });
 
 test("summarize reports median, p90, max and the justification share", () => {
