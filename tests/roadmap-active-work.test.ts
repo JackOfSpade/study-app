@@ -18,6 +18,7 @@ import {
   reconcileRoadmap,
 } from "../src/roadmap-adoption";
 import type { RoadmapReconciliationPayload } from "../src/roadmap-adoption-types";
+import { externalResolutionRow } from "../src/roadmap-active-work";
 import { prepareRoadmapExport } from "../src/roadmap-export";
 import { reviewRoadmap } from "../src/roadmap-review";
 import { createRecord } from "./helpers/record";
@@ -454,4 +455,21 @@ test("closing a source-open resolved session updates its status without dropping
   assert.ok(after[3].includes("S0008-EV01"));
   assert.equal(l.cycle, 0);
   assert.equal(l.evidence.length, 0);
+});
+test("a saved resolution without a source row or matching reviewed row fails with its integrity message", async () => {
+  const f = await fixture();
+  await reconcileRoadmap(f.g, r, f.source.content, async (p) => f.reply(p));
+  const job = f.g.study.roadmapReconciliations![0];
+  assert.equal(job.state, "ready", job.error);
+  await adoptReconciledRoadmap(f.g, r, job.id);
+  const l = f.g.study.learner!,
+    a = structuredClone(l.attempts[0]);
+  // A corrupt save: no source row, and no 0.5.1 row on the attempt's
+  // rewritten track matches it.
+  delete (a.externalResolution as { sourceRow?: string }).sourceRow;
+  a.contract.track = a.contract.track === "PY" ? "PE" : "PY";
+  assert.throws(
+    () => externalResolutionRow(l, a),
+    /no matching reviewed source disposition/,
+  );
 });

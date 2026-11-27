@@ -2,7 +2,10 @@ import { escapeHtml as escape } from "./html";
 import type { Provider, StudyRecord, Roadmap } from "./model";
 import { download } from "./dom";
 import { adoptReconciledRoadmap } from "./roadmap-adoption";
-import type { RoadmapReconciliation } from "./roadmap-adoption-types";
+import type {
+  RoadmapReconciliation,
+  RoadmapReconciliationJob,
+} from "./roadmap-adoption-types";
 import { presentRoadmapReview } from "./roadmap-exposure";
 interface Options {
   provider?: Provider;
@@ -18,6 +21,11 @@ interface Options {
   onAdopted?: () => void;
 }
 const views = new WeakMap<HTMLElement, Options>();
+const ROADMAP_FILENAME = "interview_prep_roadmap.md";
+const reviewerLabel = (provider?: Provider) =>
+  provider === "claude-cli" ? "Claude CLI" : "Study bridge";
+const changedRows = (review: NonNullable<RoadmapReconciliationJob["review"]>) =>
+  review.changes.filter((c) => c.local !== c.incoming);
 function baselineReview(p: RoadmapReconciliation, r: Roadmap) {
   if (
     !Array.isArray(p.attemptUpdates) ||
@@ -47,15 +55,14 @@ export function renderRoadmapAdoption(host: HTMLElement, options: Options) {
     g = getRecord(),
     jobs = g.study.roadmapReconciliations ?? [];
   const claude = options.provider === "claude-cli",
-    label = `${claude ? "Claude CLI" : "Study bridge"} roadmap review`;
+    label = `${reviewerLabel(options.provider)} roadmap review`;
   const refresh = () => {
     const current = document.getElementById("roadmap-adoption-controls");
     const view = current && views.get(current);
     if (current && view) renderRoadmapAdoption(current, view);
   };
-  host.innerHTML = `<p>Working file: revision ${g.study.roadmapExport?.revision ?? r.revision}. ${g.study.learner?.roadmapAdoptions?.length ?? 0} reviewed import(s). Original curriculum source is preserved.</p><p>${label} proposes a complete working roadmap for your review. Adoption preserves this run's code, transcripts and original curriculum. It starts no study session and records no new demonstration.</p>${claude ? "<p>Requesting review shares your complete local working roadmap and selected incoming file with Claude CLI. Review the proposal before adopting it.</p>" : ""}${candidate && reconcile ? `<button id="reconcile-roadmap" type="button">Request roadmap review</button>` : !reconcile ? "<p>Roadmap reconciliation is unavailable. File comparison remains available; current learning stays active.</p>" : ""}<p id="roadmap-adoption-status" role="status"></p>${[
-    ...jobs,
-  ]
+  const intro = `<p>Working file: revision ${g.study.roadmapExport?.revision ?? r.revision}. ${g.study.learner?.roadmapAdoptions?.length ?? 0} reviewed import(s). Original curriculum source is preserved.</p><p>${label} proposes a complete working roadmap for your review. Adoption preserves your code, transcripts and original curriculum. It starts no study session and records no new demonstration.</p>${claude ? "<p>Requesting review shares your complete local working roadmap and selected incoming file with Claude CLI. Review the proposal before adopting it.</p>" : ""}${candidate && reconcile ? `<button id="reconcile-roadmap" type="button">Request roadmap review</button>` : !reconcile ? "<p>Roadmap reconciliation is unavailable. File comparison remains available; current learning stays active.</p>" : ""}`;
+  const list = [...jobs]
     .reverse()
     .slice(0, 10)
     .map(
@@ -76,8 +83,9 @@ export function renderRoadmapAdoption(host: HTMLElement, options: Options) {
             : ""
         }${j.proposal?.retentionUpdates?.length ? `<p>Reviewed retention correction for ${escape(j.proposal.retentionUpdates.map((u) => u.scopeId).join(", "))}. Dates and verification counts are recomputed from the remaining valid recorded reviews. Original review transactions remain in the complete file audit; this creates no new study visit or observation.</p>` : ""}${j.proposal?.branchConflicts?.length ? `<details><summary>${j.proposal.branchConflicts.length} unresolved source-qualified branch conflict(s)</summary><p>Both histories are preserved under their original IDs. Incoming conflicting records and dependent observations are retained in the complete file's portable audit and excluded from imported learning and practical proof. No IDs are renumbered.</p><p>${escape(j.proposal.branchRationale ?? "")}</p><pre>${escape(j.proposal.branchConflicts.map((c) => `${c.track}:${c.id}`).join("\n"))}</pre></details>` : ""}<p>Local ${escape(j.payload.localHash)} · incoming ${escape(j.payload.candidateHash)}</p>${
           j.review
-            ? `<details data-review-diff="${escape(j.id)}"><summary>Proposed progress differences</summary><p>Complete proposed SHA-256: ${escape(j.review.candidateHash)}</p>${j.review.changes
-                .filter((c) => c.local !== c.incoming)
+            ? `<details data-review-diff="${escape(j.id)}"><summary>Proposed progress differences</summary><p>Complete proposed SHA-256: ${escape(j.review.candidateHash)}</p>${changedRows(
+                j.review,
+              )
                 .map(
                   (c) =>
                     `<p><strong>${escape(c.key)}</strong></p><pre>${escape(`Local: ${c.local ?? "(absent)"}\nProposed: ${c.incoming ?? "(absent)"}`)}</pre>`,
@@ -86,7 +94,20 @@ export function renderRoadmapAdoption(host: HTMLElement, options: Options) {
             : ""
         }${j.state === "ready" ? `<p>Review the complete proposed file and differences before adopting. Current local work is checked again at adoption.</p><button data-adopt-roadmap="${escape(j.id)}">Adopt reviewed roadmap</button>` : ""}${j.proposal && j.state !== "kept-local" ? `<button data-download-roadmap="${escape(j.id)}" class="quiet">Download proposed roadmap</button>` : ""}${["error", "interrupted"].includes(j.state) && reconcile ? `<button data-retry-roadmap="${escape(j.id)}" class="quiet">Retry saved reconciliation</button>` : ""}</article>`,
     )
-    .join("")}`;
+    .join("");
+  // The live region survives re-renders of the same host: progress text stays
+  // visible, and results written right after a refresh are still announced.
+  let output = host.querySelector<HTMLElement>(
+    ":scope > #roadmap-adoption-status",
+  );
+  if (output) {
+    for (const node of [...host.childNodes]) if (node !== output) node.remove();
+  } else {
+    host.innerHTML = '<p id="roadmap-adoption-status" role="status"></p>';
+    output = host.firstElementChild as HTMLElement;
+  }
+  output.insertAdjacentHTML("beforebegin", intro);
+  output.insertAdjacentHTML("afterend", list);
   if (host.isConnected && !document.getElementById("inspector")?.hidden) {
     for (const j of jobs)
       if (j.proposal)
@@ -107,8 +128,7 @@ export function renderRoadmapAdoption(host: HTMLElement, options: Options) {
           presentRoadmapReview(
             getRecord(),
             `${j.id}/${j.proposalHash}/diff`,
-            j.review.changes
-              .filter((c) => c.local !== c.incoming)
+            changedRows(j.review)
               .map(
                 (c) =>
                   `${c.key}\n${c.local ?? "(absent)"}\n${c.incoming ?? "(absent)"}`,
@@ -140,9 +160,9 @@ export function renderRoadmapAdoption(host: HTMLElement, options: Options) {
         .at(-1);
       status(
         job?.state === "ready"
-          ? `${job.payload.provider === "claude-cli" ? "Claude CLI" : "Study bridge"} roadmap review ready. Inspect its complete proposal; nothing is adopted automatically.`
+          ? `${reviewerLabel(job.payload.provider)} roadmap review ready. Inspect its complete proposal; nothing is adopted automatically.`
           : job?.state === "kept-local"
-            ? `${job.payload.provider === "claude-cli" ? "Claude CLI" : "Study bridge"} roadmap review recommends keeping your local roadmap; nothing was changed and there is nothing to adopt.`
+            ? `${reviewerLabel(job.payload.provider)} roadmap review recommends keeping your local roadmap; nothing was changed and there is nothing to adopt.`
             : job?.error
               ? `Review needs attention; captured files retained. ${job.error}`
               : "No additional review was needed.",
@@ -170,11 +190,7 @@ export function renderRoadmapAdoption(host: HTMLElement, options: Options) {
     b.onclick = () => {
       const j = jobs.find((j) => j.id === b.dataset.downloadRoadmap);
       if (j?.proposal)
-        download(
-          "interview_prep_roadmap.md",
-          j.proposal.canonical,
-          "text/markdown",
-        );
+        download(ROADMAP_FILENAME, j.proposal.canonical, "text/markdown");
     };
   for (const b of host.querySelectorAll<HTMLButtonElement>(
     "[data-adopt-roadmap]",
@@ -187,11 +203,7 @@ export function renderRoadmapAdoption(host: HTMLElement, options: Options) {
           r,
           b.dataset.adoptRoadmap!,
         );
-        download(
-          "interview_prep_roadmap.md",
-          adopted.cache.content,
-          "text/markdown",
-        );
+        download(ROADMAP_FILENAME, adopted.cache.content, "text/markdown");
         refresh();
         try {
           await persist();

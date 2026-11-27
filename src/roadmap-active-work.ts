@@ -7,12 +7,16 @@ import type {
   RoadmapReconciliationJob,
 } from "./roadmap-adoption-types";
 import { receiptRows } from "./roadmap-structure";
-import { CELL_SEPARATOR } from "./table-row";
+import { tableCells } from "./table-row";
 const key = (e: Encounter) => `${e.runId ?? "legacy"}/${e.id}`;
 const encounter = (g: StudyRecord, id: string) =>
   [...Object.values(g.encounters), ...g.study.archives].find(
     (e) => key(e) === id,
   );
+/** Human edits, reasoning, tests and executions: the learner's own work. */
+export const isHumanWork = (h: { author: string; kind: string }) =>
+  h.author === "human" &&
+  ["edit", "reasoning", "test", "execution"].includes(h.kind);
 // Legacy clock time, collaborator notes and roadmap presentation do not change
 // the captured human task. Actual edits, reasoning and tutoring do.
 const workText = (e: Encounter) =>
@@ -20,11 +24,7 @@ const workText = (e: Encounter) =>
     problem: e.problem,
     workspace: e.workspace,
     revision: e.revision,
-    history: e.history.filter(
-      (h) =>
-        h.author === "human" &&
-        ["edit", "reasoning", "test", "execution"].includes(h.kind),
-    ),
+    history: e.history.filter(isHumanWork),
     tutor: e.tutor,
     group: (e.group ?? []).filter((m) => m.author === "human"),
     executions: (e.executions ?? []).filter((j) => j.author === "human"),
@@ -54,13 +54,7 @@ export async function captureActiveAttempts(
           (latest, h) => Math.max(latest, h.seq),
           Math.max(g.seq, 0),
         ),
-        humanSequences: e.history
-          .filter(
-            (h) =>
-              h.author === "human" &&
-              ["edit", "reasoning", "test", "execution"].includes(h.kind),
-          )
-          .map((h) => h.seq),
+        humanSequences: e.history.filter(isHumanWork).map((h) => h.seq),
       });
   }
   return result;
@@ -141,11 +135,9 @@ export function externalResolutionRow(l: LearnerLedger, a: LearningAttempt) {
       v.disposition,
     ) ||
     receipt.canonicalHash !== v.canonicalHash ||
+    !row ||
     row !== v.sourceRow ||
-    row
-      .split(CELL_SEPARATOR)
-      .slice(1, -1)
-      .map((s) => s.trim())[3] !== v.disposition
+    tableCells(row)[3] !== v.disposition
   )
     throw Error(
       "External attempt resolution has no matching reviewed source disposition",

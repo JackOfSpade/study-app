@@ -4,7 +4,7 @@ import type {
   RoadmapReconciliationPayload,
 } from "./roadmap-adoption-types";
 import { inspectMergedDocument } from "./roadmap-structure";
-import { CELL_SEPARATOR } from "./table-row";
+import { CELL_SEPARATOR, tableCells } from "./table-row";
 const journals = (text: string) =>
   text.match(/<!-- BRANCH_RECORDS [^\n]* -->/g) ?? [];
 const idOf = (row: string) => row.split(CELL_SEPARATOR)[1]?.trim();
@@ -87,16 +87,8 @@ export function normalizeBranchRecords(
     )
       throw Error("Branch conflict needs two distinct actual source records");
     requested.add(key);
-    const a = local.rows
-        .get(key)!
-        .split(CELL_SEPARATOR)
-        .slice(1, -1)
-        .map((s) => s.trim()),
-      b = incoming.rows
-        .get(key)!
-        .split(CELL_SEPARATOR)
-        .slice(1, -1)
-        .map((s) => s.trim());
+    const a = tableCells(local.rows.get(key)!),
+      b = tableCells(incoming.rows.get(key)!);
     if (
       claim.id.includes("-A") &&
       a.slice(0, 3).join("|") === b.slice(0, 3).join("|")

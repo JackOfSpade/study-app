@@ -1,32 +1,63 @@
+import type { LearnerLedger } from "./learning-model";
+import { isRecord } from "./records";
 import type {
   RoadmapReconciliation,
   RoadmapReconciliationPayload,
 } from "./roadmap-adoption-types";
 import { isAssessedToken } from "./roadmap-export-names";
-import { inspectMergedDocument } from "./roadmap-structure";
-import { CELL_SEPARATOR } from "./table-row";
+import { inspectMergedDocument, receiptRows } from "./roadmap-structure";
+import { tableCells as cells } from "./table-row";
 
-const cells = (row: string) =>
-  row
-    .split(CELL_SEPARATOR)
-    .slice(1, -1)
-    .map((s) => s.trim());
+/** Dispositions a terminal correction may invalidate. */
+const CLOSED_CORRECTABLE = ["COMPLETED", "SERVED", "DECLINED", "SUPERSEDED"];
+/** Dispositions that close an attempt. */
+const TERMINAL = [...CLOSED_CORRECTABLE, "INVALIDATED"];
+/** Dispositions of an attempt that is still being worked on. */
+const OPEN = ["PENDING", "PARTIAL", "IN-PROGRESS", "INTERRUPTED", "SUSPENDED"];
+const state = (s: string) => /^([A-Z-]+)\b/.exec(s)?.[1];
+const objectiveRefs = (text: string): string[] =>
+  text.match(/\b[TXI]\d{2}(?:\.\d+)?\b/g) ?? [];
+interface AttemptUpdateAudit {
+  schema: 1;
+  key: string;
+  localHash: string;
+  incomingHash: string;
+  previousRow: string;
+  updatedRow: string;
+  rationale: string;
+  resolveCurrent?: unknown;
+  correctionDecision?: {
+    id: string;
+    excerpt: string;
+    key: string;
+    row: string;
+  };
+}
 const journals = (text: string) =>
   text.match(/<!-- ATTEMPT_UPDATE [^\n]* -->/g) ?? [];
-function validateAudit(audit: string) {
+function validateAudit(audit: string): AttemptUpdateAudit {
   try {
-    const value = JSON.parse(
+    const value: unknown = JSON.parse(
       decodeURIComponent(
         audit.slice("<!-- ATTEMPT_UPDATE ".length, -" -->".length),
       ),
     );
+    if (
+      !isRecord(value) ||
+      typeof value.previousRow !== "string" ||
+      typeof value.updatedRow !== "string" ||
+      typeof value.key !== "string" ||
+      typeof value.localHash !== "string" ||
+      typeof value.incomingHash !== "string" ||
+      typeof value.rationale !== "string"
+    )
+      throw Error();
     const a = cells(value.previousRow),
       b = cells(value.updatedRow);
     if (
       value.schema !== 1 ||
       !/^[a-f0-9]{64}$/.test(value.localHash) ||
       !/^[a-f0-9]{64}$/.test(value.incomingHash) ||
-      typeof value.rationale !== "string" ||
       !value.rationale.trim() ||
       value.rationale.length > 1500 ||
       !/^(PY|PE)_PROGRESS\/0\.5\.1 Attempt status register\/\d+\/S\d{4}-A\d{2,}$/.test(
@@ -39,12 +70,19 @@ function validateAudit(audit: string) {
     )
       throw Error();
     if (value.correctionDecision) {
-      const d = value.correctionDecision,
-        c = cells(d.row),
+      const d = value.correctionDecision;
+      if (
+        !isRecord(d) ||
+        typeof d.id !== "string" ||
+        typeof d.excerpt !== "string" ||
+        typeof d.key !== "string" ||
+        typeof d.row !== "string"
+      )
+        throw Error();
+      const c = cells(d.row),
         track = value.key.split("_")[0];
       if (
         !/^DEC\d{4}$/.test(d.id) ||
-        typeof d.excerpt !== "string" ||
         d.excerpt.length < 24 ||
         d.excerpt.length > 1500 ||
         !/^SHARED_PROGRESS\/S0\.3 Shared decisions\/\d+\/DEC\d{4}$/.test(
@@ -58,20 +96,17 @@ function validateAudit(audit: string) {
         c[6] !== "ACTIVE" ||
         !c[3].split(/[\s,;]+/).includes(`${track}:${a[0]}`) ||
         !c[4].includes(d.excerpt) ||
-        !["COMPLETED", "SERVED", "DECLINED", "SUPERSEDED"].includes(
-          state(a[3]) ?? "",
-        ) ||
+        !CLOSED_CORRECTABLE.includes(state(a[3]) ?? "") ||
         state(b[3]) !== "INVALIDATED" ||
         a[4] !== b[4]
       )
         throw Error();
     }
-    return value;
+    return value as unknown as AttemptUpdateAudit;
   } catch {
     throw Error("Malformed portable attempt disposition audit");
   }
 }
-const state = (s: string) => /^([A-Z-]+)\b/.exec(s)?.[1];
 const attemptKey = (track: string, id: string, rows: Map<string, string>) =>
   [...rows.keys()].find(
     (key) =>
@@ -134,22 +169,14 @@ export function normalizeAttemptUpdates(
       throw Error(
         "Attempt update cannot rewrite the issued task identity, date or scope",
       );
-    const open = [
-      "PENDING",
-      "PARTIAL",
-      "IN-PROGRESS",
-      "INTERRUPTED",
-      "SUSPENDED",
-    ].includes(state(a[3]) ?? "");
+    const open = OPEN.includes(state(a[3]) ?? "");
     let correctionDecision:
       { id: string; excerpt: string; key: string; row: string } | undefined;
     if (update.correctionDecision) {
       const claim = update.correctionDecision;
       if (
         open ||
-        !["COMPLETED", "SERVED", "DECLINED", "SUPERSEDED"].includes(
-          state(a[3]) ?? "",
-        ) ||
+        !CLOSED_CORRECTABLE.includes(state(a[3]) ?? "") ||
         state(b[3]) !== "INVALIDATED" ||
         update.resolveCurrent ||
         a[4] !== b[4] ||
@@ -223,13 +250,7 @@ export function normalizeAttemptUpdates(
       );
       if (
         !captured ||
-        ![
-          "COMPLETED",
-          "SERVED",
-          "DECLINED",
-          "SUPERSEDED",
-          "INVALIDATED",
-        ].includes(state(b[3])!) ||
+        !TERMINAL.includes(state(b[3])!) ||
         captured.encounter !== update.resolveCurrent.encounter ||
         captured.workHash !== update.resolveCurrent.workHash ||
         !/^[a-f0-9]{64}$/.test(update.resolveCurrent.workHash)
@@ -245,31 +266,26 @@ export function normalizeAttemptUpdates(
           "Current attempt resolution changed the captured human work cutoff",
         );
       update.resolveCurrent.humanCutoff = captured.humanCutoff;
+      const scope = objectiveRefs(a[2]),
+        prefix = `${update.track}_PROGRESS/0.5 Assessment evidence register/`;
       const assessed = [
         ...new Set(
-          [...merged.rows]
-            .filter(
-              ([key, row]) =>
-                key.startsWith(
-                  `${update.track}_PROGRESS/0.5 Assessment evidence register/`,
-                ) &&
-                cells(row)[1] === update.attemptId &&
-                (a[2].match(/\b[TXI]\d{2}(?:\.\d+)?\b/g) ?? []).some((id) =>
-                  (
-                    (cells(row)[3].match(/\b[TXI]\d{2}(?:\.\d+)?\b/g) ??
-                      []) as string[]
-                  ).includes(id),
-                ) &&
-                isAssessedToken(cells(row)[5]),
+          [...merged.rows].flatMap(([key, row]) => {
+            if (!key.startsWith(prefix)) return [];
+            const c = cells(row);
+            if (
+              c[1] !== update.attemptId ||
+              !scope.some((id) => objectiveRefs(c[3]).includes(id)) ||
+              !isAssessedToken(c[5])
             )
-            .flatMap(([, row]) =>
-              (
-                /artifact references ([\d, ]+);/
-                  .exec(cells(row)[8])?.[1]
-                  .split(",")
-                  .map((s) => Number(s.trim())) ?? []
-              ).filter((seq) => captured.humanSequences.includes(seq)),
-            ),
+              return [];
+            return (
+              /artifact references ([\d, ]+);/
+                .exec(c[8])?.[1]
+                .split(",")
+                .map((s) => Number(s.trim())) ?? []
+            ).filter((seq) => captured.humanSequences.includes(seq));
+          }),
         ),
       ].sort((a, b) => a - b);
       if (
@@ -306,15 +322,14 @@ export function normalizeAttemptUpdates(
     ...journals(payload.candidate),
   ]);
   for (const audit of previous) {
-    const value = validateAudit(audit);
+    const decision = validateAudit(audit).correctionDecision;
     if (
-      value.correctionDecision &&
-      (merged.rows.get(value.correctionDecision.key) !==
-        value.correctionDecision.row ||
+      decision &&
+      (merged.rows.get(decision.key) !== decision.row ||
         [...merged.rows.keys()].filter(
           (key) =>
             key.startsWith("SHARED_PROGRESS/S0.3 Shared decisions/") &&
-            key.endsWith("/" + value.correctionDecision.id),
+            key.endsWith("/" + decision.id),
         ).length !== 1)
     )
       throw Error(
@@ -338,7 +353,7 @@ export function normalizeAttemptUpdates(
 /** Closed actual visits remain historical facts. Later projection must not
  * reconstruct their old disposition over a reviewed terminal correction. */
 export function terminalCorrectionRow(
-  l: import("./learning-model").LearnerLedger,
+  l: LearnerLedger,
   id: string,
   track: string,
 ) {
@@ -348,8 +363,7 @@ export function terminalCorrectionRow(
     ),
   );
   if (!reviewed) return undefined;
-  const source = l.roadmapAdoptions!.at(-1)!.proposal.canonical,
-    rows = inspectMergedDocument(source).rows;
+  const rows = receiptRows(l.roadmapAdoptions!.at(-1)!);
   const key = attemptKey(track, id, rows),
     row = key && rows.get(key);
   if (!row || state(cells(row)[3]) !== "INVALIDATED")
