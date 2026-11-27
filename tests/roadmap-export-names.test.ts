@@ -22,9 +22,9 @@ import { parseRoadmapDocument } from "../src/roadmap-document";
 import {
   prepareRoadmapExport,
   roadmapSemanticFingerprint,
-  sha256,
   type RoadmapExport,
 } from "../src/roadmap-export";
+import { sha256 } from "../src/digest";
 import {
   assessedToken,
   isAssessedToken,

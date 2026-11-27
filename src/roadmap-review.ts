@@ -1,7 +1,10 @@
 import { sha256 } from "./digest";
 import type { Roadmap, Track } from "./model";
 import { parseRoadmapDocument } from "./roadmap-document";
-import { inspectMergedDocument } from "./roadmap-structure";
+import {
+  inspectMergedDocument,
+  isAssessmentRegisterKey,
+} from "./roadmap-structure";
 
 export interface RoadmapReview {
   resume?: {
@@ -62,20 +65,20 @@ export async function reviewRoadmap(
       incoming = inspectMergedDocument(candidate);
     report.candidateRevision = incoming.revision;
     const saved = await parseRoadmapDocument(candidate, r);
+    // parseRoadmapDocument always sets lap and cleared.
+    const summary = (t: Track) => {
+      const s = saved.tracks[t];
+      return {
+        tier: s.tier,
+        phase: s.phase,
+        lap: s.lap!,
+        cleared: s.cleared!,
+        remaining: [...s.remaining],
+      };
+    };
     report.resume = {
       ratioPosition: saved.resume?.ratioPosition,
-      tracks: Object.fromEntries(
-        (["PY", "PE"] as const).map((t) => [
-          t,
-          {
-            tier: saved.tracks[t].tier,
-            phase: saved.tracks[t].phase,
-            lap: saved.tracks[t].lap!,
-            cleared: saved.tracks[t].cleared!,
-            remaining: [...saved.tracks[t].remaining],
-          },
-        ]),
-      ) as NonNullable<RoadmapReview["resume"]>["tracks"],
+      tracks: { PY: summary("PY"), PE: summary("PE") },
       retentionRecords: Object.keys(saved.resume?.reviews ?? {}).length,
       suspendedQueues: (["PY", "PE"] as const).reduce(
         (n, t) => n + (saved.tracks[t].suspended?.length ?? 0),
@@ -131,7 +134,7 @@ export async function reviewRoadmap(
         local: localRow,
         conflict,
       });
-      if (before && next !== before && /\/0\.5(?:\.1)? /.test(key))
+      if (before && next !== before && isAssessmentRegisterKey(key))
         report.issues.push({
           severity: "review",
           detail: `Historical evidence or attempt row changed or removed: ${key}`,

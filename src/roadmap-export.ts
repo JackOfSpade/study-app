@@ -17,9 +17,18 @@ import {
   restoreFullQueues,
 } from "./learner";
 import { roleFocused } from "./career-profile";
-import type { LearnerLedger } from "./learning-model";
-import { learningAttemptRoot, servedLearningAttempts } from "./learning-model";
-import type { Roadmap, Track } from "./model";
+import {
+  isFinalTarget,
+  learningAttemptRoot,
+  learningProgress,
+  progressStatus,
+  scopeKey,
+  servedLearningAttempts,
+  studyRatioPosition,
+  type LearnerLedger,
+  type ScopeDefinition,
+} from "./learning-model";
+import type { Objective, Roadmap, Track } from "./model";
 import {
   baselineCheckpointValid,
   baselineReviewSuspended,
@@ -39,20 +48,13 @@ import {
   formatIdentifier,
   projectIdentifierCounters,
 } from "./roadmap-identifiers";
-
+import { PROTECTED_BLOCKS } from "./roadmap-structure";
 import {
   curriculumReadiness,
   finalRequirements,
   finalRequirementStatus,
   learningTarget,
 } from "./final-requirements";
-import {
-  isFinalTarget,
-  learningProgress,
-  progressStatus,
-  scopeKey,
-  studyRatioPosition,
-} from "./learning-model";
 import { CELL_SEPARATOR } from "./table-row";
 export interface RoadmapExport {
   fingerprint: string;
@@ -64,7 +66,6 @@ export interface RoadmapExport {
   gapIds: Record<string, string>;
 }
 const tracks = ["PY", "PE"] as const;
-export { sha256 } from "./digest";
 
 function block(raw: string, name: string) {
   const start = `<!-- BEGIN ${name} -->`,
@@ -114,9 +115,11 @@ function inSection(
 }
 // Generated cells are single-line Markdown text. Never interpolate raw prompts,
 // solutions, conversations or free-form assessment rationales into the roadmap.
+// An escaped "<!--" keeps model-written text from forging a block marker.
 function cell(value: unknown) {
   return String(value)
     .replace(/\|/g, "&#124;")
+    .replace(/<!--/g, "&lt;!--")
     .replace(/[\r\n]+/g, " ")
     .trim();
 }
@@ -164,6 +167,70 @@ function upsert(raw: string, rows: string[][]) {
     result.slice(at);
   return result;
 }
+/** Stamp a new revision's front matter onto the text of its parent. */
+function stampRevision(
+  text: string,
+  revision: number,
+  parentHash: string,
+  date: string,
+) {
+  return text
+    .replace(/^revision: \d+$/m, `revision: ${revision}`)
+    .replace(/^previous_revision: \d+$/m, `previous_revision: ${revision - 1}`)
+    .replace(/^parent_file_sha256: .+$/m, `parent_file_sha256: ${parentHash}`)
+    .replace(/^updated_on: .+$/m, `updated_on: ${date}`);
+}
+function assertProtectedBlocks(
+  text: string,
+  raw: string,
+  message: (name: string) => string,
+) {
+  for (const name of PROTECTED_BLOCKS)
+    if (block(text, name) !== block(raw, name)) throw Error(message(name));
+}
+/** The value cell of a saved two-column field row. */
+function savedField(text: string, label: string) {
+  const line = text.split("\n").find((v) => v.startsWith(`| ${label} |`));
+  if (!line) throw Error(`Missing saved field ${label}`);
+  return split(line)[1];
+}
+/** Mark session rows the ledger records as interrupted, once, in place. */
+function markInterruptedSessions(text: string, l: LearnerLedger) {
+  return table(text, (c) => {
+    if (
+      l.sessions.find((v) => v.id === c[0])?.status ===
+        "INTERRUPTED_AT_LAST_SAVE" &&
+      !c[1].includes("INTERRUPTED_AT_LAST_SAVE")
+    ) {
+      c[1] += "; INTERRUPTED_AT_LAST_SAVE; no invented closing time";
+      return c;
+    }
+    return undefined;
+  });
+}
+/** A scope's independently shown facets, and the rest with their outcome. */
+function facetFindings(
+  def: ScopeDefinition | undefined,
+  facets: Record<string, { outcome: string }> | undefined,
+  depth: number,
+) {
+  const outcome = (id: string) => facets?.[`D${depth}:${id}`]?.outcome;
+  return {
+    independent:
+      def?.facets
+        .filter((f) => outcome(f.id) === "independent")
+        .map((f) => `${f.id}: ${f.description}`) ?? [],
+    missing:
+      def?.facets
+        .filter((f) => outcome(f.id) !== "independent")
+        .map(
+          (f) => `${f.id}: ${outcome(f.id) ?? "unknown"}; ${f.description}`,
+        ) ?? [],
+  };
+}
+/** Every required checkpoint of the objective is P. */
+const meetsTarget = (l: LearnerLedger, o: Pick<Objective, "id" | "target">) =>
+  l.cells[o.id].states.slice(0, o.target).every((s) => s === "P");
 const short = (id: string) => id.split(":").at(-1)!;
 const topic = (id: string) => short(id).split(".")[0];
 function count(
@@ -387,8 +454,8 @@ function validate(r: Roadmap, l: LearnerLedger) {
   }
 }
 
-/** Complete semantic progress save. The caller commits this cache only after
- * success. Original source bytes and all three protected blocks are immutable. */
+/** Project reviewed practical environment work into PE progress (0.8.1, the
+ * dashboard and 0.13 receipts). Academic state is untouched. */
 function projectEnvironment(raw: string, r: Roadmap, l: LearnerLedger) {
   const entries = l.environmentEvidence ?? [];
   if (!entries.length) return raw;
@@ -497,17 +564,8 @@ export async function roadmapSemanticFingerprint(
   if (Object.keys(usedFinal).length) semantic.finalProgress = usedFinal;
   return sha256(JSON.stringify(semantic));
 }
-export async function prepareRoadmapExport(
-  r: Roadmap,
-  ledger: LearnerLedger,
-  cache?: RoadmapExport,
-  at = new Date().toISOString(),
-): Promise<RoadmapExport> {
-  const l = sourceLedgerProjection(r, ledger);
-  // The source file represents the original curriculum. A role-profile gate
-  // is useful scheduling state, but is never proof that its deferred original
-  // objectives passed. Recompute only this disposable projection under the
-  // original requirements; the active profile and learner records stay intact.
+/** Verify the source, the ledger and every receipt it carries before export. */
+async function verifyExportInputs(r: Roadmap, l: LearnerLedger) {
   if ((await sha256(r.raw)) !== r.sourceHash)
     throw Error("Original roadmap integrity failure");
   validate(r, l);
@@ -540,22 +598,95 @@ export async function prepareRoadmapExport(
     )
       throw Error("Environment review receipt integrity failure");
   }
+}
+/** A saved export is reusable only while intact and not newer than the ledger. */
+async function verifyCache(r: Roadmap, l: LearnerLedger, cache: RoadmapExport) {
+  if (
+    (await sha256(cache.content)) !== cache.hash ||
+    cache.ledgerVersion > l.version
+  )
+    throw Error("Saved export integrity or ancestry failure");
+  if (
+    Number(/^revision: (\d+)$/m.exec(cache.content)?.[1]) !== cache.revision ||
+    cache.revision < r.revision
+  )
+    throw Error("Saved export revision metadata is inconsistent");
+  assertProtectedBlocks(
+    cache.content,
+    r.raw,
+    (name) => `Saved export changed protected ${name}`,
+  );
+}
+/** Append each retention transaction the shared block does not yet record. */
+function appendRetentionAudit(content: string, l: LearnerLedger) {
+  for (const event of l.retentionHistory ?? []) {
+    const audit = retentionEventText(event);
+    if (!content.includes(audit)) {
+      let progress = block(content, "SHARED_PROGRESS").trimEnd();
+      if (!progress.includes("### S0.8 Delayed review transaction audit\n"))
+        progress +=
+          "\n\n### S0.8 Delayed review transaction audit\n\nOriginal evidence-linked review transactions. Withdrawn reviews remain historical facts; only explicitly reviewed valid transactions count toward the current retention schedule.\n";
+      content = replaceBlock(
+        content,
+        "SHARED_PROGRESS",
+        progress + "\n\n" + audit + "\n",
+      );
+    }
+  }
+  return content;
+}
+/** Final checks: protected blocks unchanged, every objective row projected
+ * exactly, and no register row duplicated. */
+function assertExportShape(r: Roadmap, l: LearnerLedger, content: string) {
+  assertProtectedBlocks(
+    content,
+    r.raw,
+    (name) => `Protected ${name} changed during export`,
+  );
+  for (const t of tracks) {
+    const p = block(content, `${t}_PROGRESS`),
+      ledger = section(p, "0.4 Objective checkpoint ledger").text;
+    const rows = ledger
+      .split("\n")
+      .filter((line) => /^\| [TX]\d{2}\.\d+ \|/.test(line));
+    if (rows.length !== r.tracks[t].objectives.length)
+      throw Error("Export lost objective rows");
+    for (const line of rows) {
+      const c = split(line);
+      if (c.slice(2, 6).join(",") !== l.cells[`${t}:${c[0]}`].states.join(","))
+        throw Error("Export checkpoint projection mismatch");
+    }
+    for (const heading of [
+      "0.5 Assessment evidence register",
+      "0.5.1 Attempt status register",
+      "0.6 Facet gaps, unknowns, and dependencies",
+    ]) {
+      const ids = section(p, heading)
+        .text.split("\n")
+        .filter((line) => /^\| (?:S\d{4}-(?:A|EV)\d+|G\d{4}) \|/.test(line))
+        .map((line) => split(line)[0]);
+      if (new Set(ids).size !== ids.length)
+        throw Error("Export duplicated evidence, attempt or gap row");
+    }
+  }
+}
+/** Complete semantic progress save. The caller commits this cache only after
+ * success. Original source bytes and all three protected blocks are immutable. */
+export async function prepareRoadmapExport(
+  r: Roadmap,
+  ledger: LearnerLedger,
+  cache?: RoadmapExport,
+  at = new Date().toISOString(),
+): Promise<RoadmapExport> {
+  // The source file represents the original curriculum. A role-profile gate
+  // is useful scheduling state, but is never proof that its deferred original
+  // objectives passed. Recompute only this disposable projection under the
+  // original requirements; the active profile and learner records stay intact.
+  const l = sourceLedgerProjection(r, ledger);
+  await verifyExportInputs(r, l);
   const fingerprint = await roadmapSemanticFingerprint(l);
   if (cache) {
-    if (
-      (await sha256(cache.content)) !== cache.hash ||
-      cache.ledgerVersion > l.version
-    )
-      throw Error("Saved export integrity or ancestry failure");
-    if (
-      Number(/^revision: (\d+)$/m.exec(cache.content)?.[1]) !==
-        cache.revision ||
-      cache.revision < r.revision
-    )
-      throw Error("Saved export revision metadata is inconsistent");
-    for (const name of ["MERGE_RULES", "PY_CURRICULUM", "PE_CURRICULUM"])
-      if (block(cache.content, name) !== block(r.raw, name))
-        throw Error(`Saved export changed protected ${name}`);
+    await verifyCache(r, l, cache);
     if (cache.fingerprint === fingerprint) return structuredClone(cache);
   }
   if (
@@ -580,22 +711,22 @@ export async function prepareRoadmapExport(
     parentHash = await sha256(parent),
     revision = (cache?.revision ?? r.revision) + 1,
     date = localDate(at);
-  for (const name of ["MERGE_RULES", "PY_CURRICULUM", "PE_CURRICULUM"])
-    if (block(parent, name) !== block(r.raw, name))
-      throw Error(`Export parent changed protected ${name}`);
+  assertProtectedBlocks(
+    parent,
+    r.raw,
+    (name) => `Export parent changed protected ${name}`,
+  );
   if (
     !l.attempts.length &&
     !l.evidence.length &&
     l.environmentEvidence?.length
   ) {
-    let content = projectEnvironment(parent, r, l)
-      .replace(/^revision: \d+$/m, `revision: ${revision}`)
-      .replace(
-        /^previous_revision: \d+$/m,
-        `previous_revision: ${revision - 1}`,
-      )
-      .replace(/^parent_file_sha256: .+$/m, `parent_file_sha256: ${parentHash}`)
-      .replace(/^updated_on: .+$/m, `updated_on: ${date}`);
+    let content = stampRevision(
+      projectEnvironment(parent, r, l),
+      revision,
+      parentHash,
+      date,
+    );
     for (const t of tracks) {
       let p = block(content, `${t}_PROGRESS`);
       p = inSection(p, "0.2 Breadth scheduler and resume packet", (text) =>
@@ -691,11 +822,7 @@ export async function prepareRoadmapExport(
   counters.evidence[allocationSession] ??= 1;
   const reserved = `${allocationSession}: next shared attempt ${formatIdentifier(`${allocationSession}-A`, counters.attempts[allocationSession])}, evidence ${formatIdentifier(`${allocationSession}-EV`, counters.evidence[allocationSession])}; next gap ${formatIdentifier("G", counters.nextGap, 4)}; next shared decision ${formatIdentifier("DEC", counters.nextDecision, 4)}; next genuinely new session ${formatIdentifier("S", counters.nextSession, 4)}`;
   const anchor = `Merged revision ${revision}, ${date}; previous revision ${revision - 1}; actual complete parent SHA-256 ${parentHash}. Downloading this unchanged saved state again does not allocate identifiers or another revision.`;
-  let content = parent
-    .replace(/^revision: \d+$/m, `revision: ${revision}`)
-    .replace(/^previous_revision: \d+$/m, `previous_revision: ${revision - 1}`)
-    .replace(/^parent_file_sha256: .+$/m, `parent_file_sha256: ${parentHash}`)
-    .replace(/^updated_on: .+$/m, `updated_on: ${date}`);
+  let content = stampRevision(parent, revision, parentHash, date);
   for (const t of tracks) {
     const state = l.tracks[t],
       objs = r.tracks[t].objectives,
@@ -705,11 +832,15 @@ export async function prepareRoadmapExport(
     const readiness = curriculumReadiness(r, l, t);
     const phase = `Tier ${state.tier} / ${state.phase} / ${wave(l, t)}`;
     const counts = `${count(r, l, t).text}; ${[1, 2, 3, 4].map((d) => `D${d} ${count(r, l, t, d).text}`).join(", ")}`;
-    const fulfilled = objs.filter((o) =>
-      o.cells
-        .map((_, i) => i + 1)
-        .filter((d) => d <= o.target)
-        .every((d) => l.cells[o.id].states[d - 1] === "P"),
+    const fulfilled = objs.filter((o) => meetsTarget(l, o)).length;
+    const skippable = r.tracks[t].rotation.filter(
+      (name) =>
+        readiness.requirements.some(
+          (d) => d.kind === "transfer" && d.name === name && d.status === "P",
+        ) &&
+        objs
+          .filter((o) => topic(o.id) === name)
+          .every((o) => meetsTarget(l, o)),
     ).length;
     p = inSection(p, "0.1 Learner profile and dashboard", (s) =>
       fields(s, {
@@ -732,7 +863,7 @@ export async function prepareRoadmapExport(
           "None confirmed",
         "Next new session ID": reserved.split("next genuinely new session ")[1],
         "Last saved study session": `${current}; merged revision ${revision}; ${date}; save does not imply a session close`,
-        "Topics eligible to skip all instruction": `${r.tracks[t].rotation.filter((name) => readiness.requirements.some((d) => d.kind === "transfer" && d.name === name && d.status === "P") && objs.filter((o) => topic(o.id) === name).every((o) => Array.from({ length: o.target }, (_, i) => i + 1).every((depth) => l.cells[o.id].states[depth - 1] === "P"))).length}/${readiness.transfers.total}`,
+        "Topics eligible to skip all instruction": `${skippable}/${readiness.transfers.total}`,
         "Topic transfer checks": `${readiness.transfers.passed}/${readiness.transfers.total} verified; independent changed-context evidence only`,
         "Integration coverage": `${readiness.integrations.passed}/${readiness.integrations.total} selected required areas verified`,
         Retention: reviewText(r, l, t),
@@ -770,6 +901,10 @@ export async function prepareRoadmapExport(
           .flatMap((a) => a.contract.objectiveIds.map(topic)),
       ]),
     ];
+    const lastServed = recentServed
+        .filter((a) => a.contract.track === t)
+        .at(-1),
+      lastTopics = lastServed?.contract.objectiveIds.map(topic).join(", ");
     p = inSection(p, "0.2 Breadth scheduler and resume packet", (s) =>
       fields(s, {
         "Active tier / phase": `Tier ${state.tier} / ${state.phase}`,
@@ -782,7 +917,7 @@ export async function prepareRoadmapExport(
             )
             .join("; ") || "None",
         "Active wave / lap": wave(l, t),
-        "Current difficulty ceiling": `D${state.tier}; use the unchanged curriculum's depth contract; survival conditions do not increase it`,
+        "Current difficulty ceiling": `D${state.tier}; use the unchanged curriculum's depth contract; saves and new sessions do not increase it`,
         "Remaining topics in current lap":
           state.queue.join(", ") || "None; reconcile actual gate evidence",
         "Current lap roster": r.tracks[t].rotation.join(", "),
@@ -813,31 +948,19 @@ export async function prepareRoadmapExport(
               attempts.map((a) => a.contract.scheduleNote).filter(Boolean),
             ),
           ].join("; ") || "None",
-        "Last primary topic / consecutive visits": recentServed
-          .filter((a) => a.contract.track === t)
-          .at(-1)
-          ?.contract.objectiveIds.map(topic)
-          .join(", ")
-          ? `${recentServed.filter((a) => a.contract.track === t).at(-1)!.id}; ${recentServed
-              .filter((a) => a.contract.track === t)
-              .at(-1)!
-              .contract.objectiveIds.map(topic)
-              .join(
-                ", ",
-              )}; one bounded visit; reviews do not consume ordinary breadth`
-          : split(
-              block(parent, `${t}_PROGRESS`)
-                .split("\n")
-                .find((line) =>
-                  line.startsWith(
-                    "| Last primary topic / consecutive visits |",
-                  ),
-                )!,
-            )[1],
+        "Last primary topic / consecutive visits": lastTopics
+          ? `${lastServed!.id}; ${lastTopics}; one bounded visit; reviews do not consume ordinary breadth`
+          : savedField(
+              block(parent, `${t}_PROGRESS`),
+              "Last primary topic / consecutive visits",
+            ),
         "Topics visited in current lap": visited.join(", ") || "None",
         "Shallowest outstanding required depth":
           [1, 2, 3, 4]
-            .find((d) => count(r, l, t, d).passed < count(r, l, t, d).total)
+            .find((d) => {
+              const n = count(r, l, t, d);
+              return n.passed < n.total;
+            })
             ?.toString()
             .replace(/^/, "D") ??
           "All checkpoint cells P; separate transfer/integration/readiness gates still apply",
@@ -864,17 +987,20 @@ export async function prepareRoadmapExport(
         if (!obj) return;
         const current = l.cells[id],
           changed = evs.filter((e) => e.objectiveId === id);
+        // Facet proofs cite the same new evidence: list each reference once.
         const refs =
           [
-            obj.refs === "—" ? "" : obj.refs,
-            ...changed.map((e) => e.id),
-            ...Object.values(current.facets).flatMap((p) => p.evidenceIds),
-            ...Object.entries(gapIds)
-              .filter(([key]) => key.startsWith(`${id}/`))
-              .map(([, id]) => id),
-          ]
-            .filter(Boolean)
-            .join("; ") || "—";
+            ...new Set(
+              [
+                obj.refs === "—" ? "" : obj.refs,
+                ...changed.map((e) => e.id),
+                ...Object.values(current.facets).flatMap((p) => p.evidenceIds),
+                ...Object.entries(gapIds)
+                  .filter(([key]) => key.startsWith(`${id}/`))
+                  .map(([, id]) => id),
+              ].filter(Boolean),
+            ),
+          ].join("; ") || "—";
         const reviews =
           Object.values(l.reviews)
             .filter((v) => v.objectiveId === id)
@@ -988,7 +1114,13 @@ export async function prepareRoadmapExport(
           return;
         if (!l.verifiedScopes.includes(key)) return c;
         if (l.cells[`${t}:${m[1]}`]?.states[d - 1] === "P") {
-          c[5] += `; full-scope proof ${l.cells[`${t}:${m[1]}`].proofs[String(d)]?.join(", ")}`;
+          // A row taken from the parent may already carry the suffix, and a
+          // baseline pass may have no recorded proof list.
+          const proof = l.cells[`${t}:${m[1]}`].proofs[String(d)];
+          const suffix = proof?.length
+            ? `; full-scope proof ${proof.join(", ")}`
+            : "";
+          if (suffix && !c[5].includes(suffix)) c[5] += suffix;
           c[6] =
             "CLOSED; full checkpoint independently verified; original observation retained";
           return c;
@@ -1003,21 +1135,11 @@ export async function prepareRoadmapExport(
         .map(([key, id]) => {
           const def = l.scopes[key],
             c = learningProgress(l, def.objectiveId);
-          const independent = def.facets
-            .filter(
-              (f) =>
-                c.facets[`D${def.depth}:${f.id}`]?.outcome === "independent",
-            )
-            .map((f) => `${f.id}: ${f.description}`);
-          const missing = def.facets
-            .filter(
-              (f) =>
-                c.facets[`D${def.depth}:${f.id}`]?.outcome !== "independent",
-            )
-            .map(
-              (f) =>
-                `${f.id}: ${c.facets[`D${def.depth}:${f.id}`]?.outcome ?? "unknown"}; ${f.description}`,
-            );
+          const { independent, missing } = facetFindings(
+            def,
+            c.facets,
+            def.depth,
+          );
           return [
             id,
             `${short(def.objectiveId)} / ${isFinalTarget(def.objectiveId) ? "Tier 4 final requirement" : `D${def.depth}`}`,
@@ -1049,13 +1171,13 @@ export async function prepareRoadmapExport(
       out = upsert(out, rows);
       return out;
     });
-    p = inSection(p, "0.3 Topic placement and breadth board", (s) =>
-      table(s, (c) => {
+    p = inSection(p, "0.3 Topic placement and breadth board", (s) => {
+      const header = split(
+        s.split("\n").find((v) => v.startsWith("| Topic |"))!,
+      );
+      return table(s, (c) => {
         const members = objs.filter((o) => topic(o.id) === c[0]);
         if (!members.length) return;
-        const header = split(
-          s.split("\n").find((v) => v.startsWith("| Topic |"))!,
-        );
         for (const d of [1, 2, 3, 4]) {
           const n = count(r, l, t, d, c[0]);
           c[header.indexOf(`D${d}`)] = n.total ? n.text : "—";
@@ -1085,11 +1207,7 @@ export async function prepareRoadmapExport(
             ? "D1_VERIFIED; later scopes separate"
             : "MIXED; preserved facets and missing scope in 0.12";
         }
-        const targetMet = members.every((o) =>
-          Array.from({ length: o.target }, (_, i) => i).every(
-            (i) => l.cells[o.id].states[i] === "P",
-          ),
-        );
+        const targetMet = members.every((o) => meetsTarget(l, o));
         const transfer = readiness.requirements.find(
           (d) => d.kind === "transfer" && d.name === c[0],
         );
@@ -1106,7 +1224,12 @@ export async function prepareRoadmapExport(
                 : "NO; transfer unresolved or not a separate gate";
         }
         return c;
-      }),
+      });
+    });
+    // The 0.3 board the gate rows count from is fixed while they are edited.
+    const board = section(p, "0.3 Topic placement and breadth board").text;
+    const boardHeader = split(
+      board.split("\n").find((line) => line.startsWith("| Topic |"))!,
     );
     p = inSection(p, "0.2.1 Tier and gate board", (s) =>
       table(s, (c) => {
@@ -1169,14 +1292,7 @@ export async function prepareRoadmapExport(
           c[2] = `${resolved.length}/${roster.length} tier-specific diagnostic obligations resolved; transfers and extension D4 scope remain distinct`;
         }
         if (d < 4) {
-          const board = section(
-            p,
-            "0.3 Topic placement and breadth board",
-          ).text;
-          const hdr = split(
-            board.split("\n").find((line) => line.startsWith("| Topic |"))!,
-          );
-          const index = hdr.indexOf(`Tier ${d} diagnostic`);
+          const index = boardHeader.indexOf(`Tier ${d} diagnostic`);
           const resolved = board
             .split("\n")
             .filter((line) => /^\| [TX]\d{2} \|/.test(line))
@@ -1197,23 +1313,11 @@ export async function prepareRoadmapExport(
       }),
     );
     const finalSummary = (id: string) => {
-      const def = l.scopes[scopeKey(id, 4)],
-        progress = l.finalProgress?.[id];
-      const independent =
-        def?.facets
-          .filter(
-            (f) => progress?.facets[`D4:${f.id}`]?.outcome === "independent",
-          )
-          .map((f) => `${f.id}: ${f.description}`) ?? [];
-      const missing =
-        def?.facets
-          .filter(
-            (f) => progress?.facets[`D4:${f.id}`]?.outcome !== "independent",
-          )
-          .map(
-            (f) =>
-              `${f.id}: ${progress?.facets[`D4:${f.id}`]?.outcome ?? "unknown"}; ${f.description}`,
-          ) ?? [];
+      const { independent, missing } = facetFindings(
+        l.scopes[scopeKey(id, 4)],
+        l.finalProgress?.[id]?.facets,
+        4,
+      );
       const refs = evs.filter((e) => e.objectiveId === id).map((e) => e.id);
       return {
         covered: independent.join("; "),
@@ -1279,17 +1383,7 @@ export async function prepareRoadmapExport(
       }),
     );
     p = inSection(p, "0.10 Session, wave, and phase history", (s) => {
-      let out = table(s, (c) => {
-        if (
-          l.sessions.find((v) => v.id === c[0])?.status ===
-            "INTERRUPTED_AT_LAST_SAVE" &&
-          !c[1].includes("INTERRUPTED_AT_LAST_SAVE")
-        ) {
-          c[1] += "; INTERRUPTED_AT_LAST_SAVE; no invented closing time";
-          return c;
-        }
-        return undefined;
-      });
+      let out = markInterruptedSessions(s, l);
       const sessions = l.sessions.filter((session) =>
         attempts.some((a) => a.session === session.id),
       );
@@ -1473,13 +1567,7 @@ export async function prepareRoadmapExport(
     fields(s, {
       "Track served by the last primary visit":
         recentServed.at(-1)?.contract.track ??
-        split(
-          shared
-            .split("\n")
-            .find((line) =>
-              line.startsWith("| Track served by the last primary visit |"),
-            )!,
-        )[1],
+        savedField(shared, "Track served by the last primary visit"),
       "Next track in alternation": `${(["PY", "PE", "PE"] as const)[studyRatioPosition(l)]}; pattern position ${studyRatioPosition(l)}; ${l.cycle} app-recorded served visit(s) since source revision ${r.revision}; imported source visits remain in their original history; unfinished visit and gate exceptions take precedence`,
       "Planned continuation order": next,
       "Tier-lead status": `PY cleared through ${l.tracks.PY.cleared}; PE cleared through ${l.tracks.PE.cleared}. A track may not start a tier more than one above the other track's current tier; independent gate evidence required.`,
@@ -1490,17 +1578,7 @@ export async function prepareRoadmapExport(
     }),
   );
   shared = inSection(shared, "S0.4 Merged session history", (s) => {
-    let out = table(s, (c) => {
-      if (
-        l.sessions.find((v) => v.id === c[0])?.status ===
-          "INTERRUPTED_AT_LAST_SAVE" &&
-        !c[1].includes("INTERRUPTED_AT_LAST_SAVE")
-      ) {
-        c[1] += "; INTERRUPTED_AT_LAST_SAVE; no invented closing time";
-        return c;
-      }
-      return undefined;
-    });
+    let out = markInterruptedSessions(s, l);
     out = upsert(
       out,
       l.sessions
@@ -1595,50 +1673,11 @@ export async function prepareRoadmapExport(
   );
   content = replaceBlock(content, "SHARED_PROGRESS", shared);
   content = projectEnvironment(content, r, l);
-  content = projectIdentifierCounters(content, counters);
-  for (const event of l.retentionHistory ?? []) {
-    const audit = retentionEventText(event);
-    if (!content.includes(audit)) {
-      let progress = block(content, "SHARED_PROGRESS").trimEnd();
-      if (!progress.includes("### S0.8 Delayed review transaction audit\n"))
-        progress +=
-          "\n\n### S0.8 Delayed review transaction audit\n\nOriginal evidence-linked review transactions. Withdrawn reviews remain historical facts; only explicitly reviewed valid transactions count toward the current retention schedule.\n";
-      content = replaceBlock(
-        content,
-        "SHARED_PROGRESS",
-        progress + "\n\n" + audit + "\n",
-      );
-    }
-  }
-  for (const name of ["MERGE_RULES", "PY_CURRICULUM", "PE_CURRICULUM"])
-    if (block(content, name) !== block(r.raw, name))
-      throw Error(`Protected ${name} changed during export`);
-  for (const t of tracks) {
-    const p = block(content, `${t}_PROGRESS`),
-      ledger = section(p, "0.4 Objective checkpoint ledger").text;
-    const rows = ledger
-      .split("\n")
-      .filter((line) => /^\| [TX]\d{2}\.\d+ \|/.test(line));
-    if (rows.length !== r.tracks[t].objectives.length)
-      throw Error("Export lost objective rows");
-    for (const line of rows) {
-      const c = split(line);
-      if (c.slice(2, 6).join(",") !== l.cells[`${t}:${c[0]}`].states.join(","))
-        throw Error("Export checkpoint projection mismatch");
-    }
-    for (const heading of [
-      "0.5 Assessment evidence register",
-      "0.5.1 Attempt status register",
-      "0.6 Facet gaps, unknowns, and dependencies",
-    ]) {
-      const ids = section(p, heading)
-        .text.split("\n")
-        .filter((line) => /^\| (?:S\d{4}-(?:A|EV)\d+|G\d{4}) \|/.test(line))
-        .map((line) => split(line)[0]);
-      if (new Set(ids).size !== ids.length)
-        throw Error("Export duplicated evidence, attempt or gap row");
-    }
-  }
+  content = appendRetentionAudit(
+    projectIdentifierCounters(content, counters),
+    l,
+  );
+  assertExportShape(r, l, content);
   return {
     fingerprint,
     content,

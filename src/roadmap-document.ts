@@ -3,13 +3,12 @@ import { finalRequirements } from "./final-requirements";
 import type { Objective, Roadmap, Track } from "./model";
 import { readIdentifierCounters } from "./roadmap-identifiers";
 import { supplementHeadingIn } from "./roadmap-export-names";
-import { inspectMergedDocument } from "./roadmap-structure";
+import { inspectMergedDocument, PROTECTED_BLOCKS } from "./roadmap-structure";
 import { CELL_SEPARATOR } from "./table-row";
 const validDay = (value: string) =>
   /^\d{4}-\d{2}-\d{2}$/.test(value) &&
   Number.isFinite(Date.parse(value)) &&
   new Date(value).toISOString().slice(0, 10) === value;
-const protectedNames = ["MERGE_RULES", "PY_CURRICULUM", "PE_CURRICULUM"];
 function part(raw: string, heading: string) {
   const marker = `### ${heading}\n`,
     a = raw.indexOf(marker);
@@ -27,6 +26,16 @@ function field(raw: string, label: string) {
   if (c.length !== 2) throw Error(`Malformed saved field ${label}`);
   return c[1];
 }
+/** Required checkpoint cells, and how many of them are P. */
+function checkpointCounts(objectives: Objective[]) {
+  return {
+    total: objectives.reduce((n, o) => n + o.target, 0),
+    passed: objectives.reduce(
+      (n, o) => n + o.cells.slice(0, o.target).filter((v) => v === "P").length,
+      0,
+    ),
+  };
+}
 const cells = (line: string) =>
   line
     .split(CELL_SEPARATOR)
@@ -38,10 +47,8 @@ export async function parseRoadmapDocument(
   raw: string,
   baseline?: Roadmap,
 ): Promise<Roadmap> {
-  if (
-    typeof raw !== "string" ||
-    new TextEncoder().encode(raw).length > 2_000_000
-  )
+  if (typeof raw !== "string") throw Error("Roadmap must be text");
+  if (new TextEncoder().encode(raw).length > 2_000_000)
     throw Error("Roadmap exceeds the 2 MB document limit");
   const parsed = inspectMergedDocument(raw),
     revision = parsed.revision;
@@ -52,7 +59,7 @@ export async function parseRoadmapDocument(
     !/^[a-f0-9]{64}$/.test(parsed.field("parent_file_sha256"))
   )
     throw Error("Invalid saved revision, date or parent metadata");
-  for (const name of protectedNames) {
+  for (const name of PROTECTED_BLOCKS) {
     if (
       (await sha256(parsed.blocks[name])) !==
       parsed.field(`${name.toLowerCase()}_sha256`)
@@ -63,13 +70,15 @@ export async function parseRoadmapDocument(
     if ((await sha256(baseline.raw)) !== baseline.sourceHash)
       throw Error("Baseline document integrity failure");
     const original = inspectMergedDocument(baseline.raw);
-    for (const name of protectedNames)
+    for (const name of PROTECTED_BLOCKS)
       if (parsed.blocks[name] !== original.blocks[name])
         throw Error(
           `Protected ${name} changed; explicit policy migration required`,
         );
-    const frame = (text: string) => {
-      const p = inspectMergedDocument(text);
+    const frame = (
+      text: string,
+      p: ReturnType<typeof inspectMergedDocument>,
+    ) => {
       for (const name of ["SHARED_PROGRESS", "PY_PROGRESS", "PE_PROGRESS"])
         text = text.replace(
           `<!-- BEGIN ${name} -->\n${p.blocks[name]}<!-- END ${name} -->`,
@@ -85,7 +94,7 @@ export async function parseRoadmapDocument(
           ) + text.slice(end)
       );
     };
-    if (frame(raw) !== frame(baseline.raw))
+    if (frame(raw, parsed) !== frame(baseline.raw, original))
       throw Error(
         "Operating contract or immutable file envelope changed; explicit policy migration required",
       );
@@ -227,12 +236,7 @@ export async function parseRoadmapDocument(
       stated = /^(\d+)\/(\d+)/.exec(
         field(dashboard, "Required checkpoint passes"),
       );
-    const total = objectives.reduce((n, o) => n + o.target, 0),
-      passed = objectives.reduce(
-        (n, o) =>
-          n + o.cells.slice(0, o.target).filter((v) => v === "P").length,
-        0,
-      );
+    const { total, passed } = checkpointCounts(objectives);
     if (!stated || Number(stated[1]) !== passed || Number(stated[2]) !== total)
       throw Error(
         `${t} dashboard checkpoint counts contradict its objective ledger`,
@@ -273,6 +277,8 @@ export async function parseRoadmapDocument(
   };
   // Parsed once per track: the retention table below consults it per row.
   const finals = {} as Record<Track, ReturnType<typeof finalRequirements>>;
+  // The rotation plus selected integrations: every queue may name only these.
+  const allowedQueue = {} as Record<Track, string[]>;
   for (const t of ["PY", "PE"] as Track[]) {
     const s = tracks[t],
       other = tracks[t === "PY" ? "PE" : "PY"];
@@ -283,12 +289,7 @@ export async function parseRoadmapDocument(
       .find((l) => l.startsWith(`| ${t} |`));
     const c = sharedRow ? cells(sharedRow) : [],
       summary = /^(\d+)\/(\d+)/.exec(c[3] ?? "");
-    const total = s.objectives.reduce((n, o) => n + o.target, 0),
-      passed = s.objectives.reduce(
-        (n, o) =>
-          n + o.cells.slice(0, o.target).filter((v) => v === "P").length,
-        0,
-      );
+    const { total, passed } = checkpointCounts(s.objectives);
     if (
       !summary ||
       Number(summary[1]) !== passed ||
@@ -297,12 +298,12 @@ export async function parseRoadmapDocument(
     )
       throw Error(`Shared ${t} dashboard contradicts track state`);
     const defs = (finals[t] = finalRequirements(result, t)),
-      allowed = [
+      allowed = (allowedQueue[t] = [
         ...s.rotation,
         ...defs
           .filter((d) => d.kind === "integration" && d.selected)
           .map((d) => d.name),
-      ];
+      ]);
     if (
       s.remaining.some((id) => !allowed.includes(id)) ||
       s.remaining.some(
@@ -426,12 +427,7 @@ export async function parseRoadmapDocument(
         ...(c[5] !== "—" ? { sequence: c[5] } : {}),
       };
     }
-    const allowed = [
-      ...tracks[t].rotation,
-      ...finals[t]
-        .filter((d) => d.kind === "integration" && d.selected)
-        .map((d) => d.name),
-    ];
+    const allowed = allowedQueue[t];
     tracks[t].suspended = table(
       "| Suspended state | Tier | Phase | Lap | Queue |",
     ).map((c) => {
@@ -468,8 +464,9 @@ export async function parseRoadmapDocument(
       .filter((s) => /^\| S\d/.test(s))) {
       const c = cells(row),
         state = /^([A-Z-]+)\b/.exec(c[3])?.[1];
-      // Older exports used engine labels. Read them without rewriting
-      // history; every newly projected task uses the curriculum's dispositions.
+      // Older exports used internal attempt-status labels (IN-PROGRESS, SERVED,
+      // INTERRUPTED, SUSPENDED). Read them without rewriting history; every
+      // newly projected task uses the curriculum's dispositions.
       if (
         c.length !== 6 ||
         ![
@@ -496,14 +493,16 @@ export async function parseRoadmapDocument(
       "0.5 Assessment evidence register",
     )
       .split("\n")
-      .filter((s) => /^\| S\d/.test(s)))
-      if (!issued[t].has(cells(row)[1]))
+      .filter((s) => /^\| S\d/.test(s))) {
+      const task = cells(row)[1];
+      if (!issued[t].has(task))
         throw Error(
-          issued[t === "PY" ? "PE" : "PY"].has(cells(row)[1])
-            ? `${t} evidence cites an assessment task issued on the other track: ${cells(row)[1]}`
+          issued[t === "PY" ? "PE" : "PY"].has(task)
+            ? `${t} evidence cites an assessment task issued on the other track: ${task}`
             : "Source evidence does not reference an issued assessment task",
         );
-  const identifiers = readIdentifierCounters(raw);
+    }
+  const identifiers = readIdentifierCounters(raw, true, parsed);
   if (identifiers.issue) issues.push(identifiers.issue);
   result.resume = {
     ratioPosition: position,

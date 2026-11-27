@@ -11,7 +11,9 @@ import {
   registerScopes,
 } from "../src/learner";
 import type { Assessment, Encounter, Roadmap } from "../src/model";
-import { prepareRoadmapExport, sha256 } from "../src/roadmap-export";
+import { sha256 } from "../src/digest";
+import { parseRoadmapDocument } from "../src/roadmap-document";
+import { prepareRoadmapExport } from "../src/roadmap-export";
 import { reviewRoadmap } from "../src/roadmap-review";
 import { createRecord } from "./helpers/record";
 const r: Roadmap = JSON.parse(readFileSync("public/curriculum.json", "utf8"));
@@ -447,4 +449,62 @@ test("roadmap export: replacement patterns in facet text stay literal instead of
   assert.ok(saved.content.length < r.raw.length * 1.2);
   const again = await prepareRoadmapExport(r, l, saved, at);
   assert.equal(again.hash, saved.hash);
+});
+
+test("roadmap export: block markers in facet text cannot forge a document block", async () => {
+  const { l, issue, assess } = fixture();
+  const e = issue();
+  const description =
+    "Explain why <!-- END PE_PROGRESS --> and <!-- BEGIN PY_PROGRESS --> are inert text";
+  const definition = e.problem!.scopeDefinitions![0];
+  definition.facets[0].description = description;
+  l.scopes[definition.id].facets[0].description = description;
+  assess(e, ["purpose"], false);
+  const saved = await prepareRoadmapExport(r, l, undefined, at);
+  assert.ok(!saved.content.includes(description));
+  assert.ok(saved.content.includes("&lt;!-- END PE_PROGRESS --> and"));
+  await parseRoadmapDocument(saved.content, r);
+  // The saved export stays readable as the parent of the next revision.
+  assess(e, ["boundary"], false);
+  const next = await prepareRoadmapExport(r, l, saved, at);
+  assert.equal(next.revision, saved.revision + 1);
+  await parseRoadmapDocument(next.content, r);
+});
+
+test("roadmap export: objective refs list each evidence ID once and gap rows never cite an undefined proof", async () => {
+  const { l, issue, assess } = fixture();
+  const e = issue();
+  assess(e);
+  const py = issue();
+  assess(py);
+  const first = await prepareRoadmapExport(r, l, undefined, at);
+  const again = await prepareRoadmapExport(
+    r,
+    l,
+    await prepareRoadmapExport(r, l, first, "2026-10-16T16:00:00.000Z"),
+    at,
+  );
+  for (const out of [first, again])
+    for (const t of ["PY", "PE"]) {
+      const progress = block(out.content, `${t}_PROGRESS`);
+      for (const line of part(progress, "0.4 Objective checkpoint ledger")
+        .split("\n")
+        .filter((line) => /^\| [TX]\d{2}\.\d+ \|/.test(line))) {
+        const refs = line.split(" | ")[7].split("; ");
+        assert.equal(new Set(refs).size, refs.length, line);
+      }
+      const gaps = part(progress, "0.6 Facet gaps, unknowns, and dependencies");
+      assert.ok(!gaps.includes("full-scope proof undefined"));
+      for (const line of gaps.split("\n"))
+        assert.ok((line.match(/full-scope proof/g) ?? []).length <= 1, line);
+    }
+  const objective = e.problem!.contract.objectiveIds[0];
+  const ledgerRow = part(
+    block(first.content, `${objective.slice(0, 2)}_PROGRESS`),
+    "0.4 Objective checkpoint ledger",
+  )
+    .split("\n")
+    .find((line) => line.startsWith(`| ${objective.slice(3)} |`))!;
+  for (const ev of l.evidence.filter((v) => v.objectiveId === objective))
+    assert.equal(ledgerRow.split(ev.id).length, 2, ev.id);
 });

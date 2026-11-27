@@ -9,7 +9,8 @@ import {
 import { curriculumReadiness } from "../src/final-requirements";
 import type { Roadmap } from "../src/model";
 import { decode, encode, recover } from "../src/persistence";
-import { prepareRoadmapExport, sha256 } from "../src/roadmap-export";
+import { sha256 } from "../src/digest";
+import { prepareRoadmapExport } from "../src/roadmap-export";
 import { createRecord } from "./helpers/record";
 const r: Roadmap = JSON.parse(readFileSync("public/curriculum.json", "utf8"));
 async function fixture() {

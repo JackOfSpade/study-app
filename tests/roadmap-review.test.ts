@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import type { Roadmap } from "../src/model";
-import { sha256 } from "../src/roadmap-export";
+import { sha256 } from "../src/digest";
 import { reviewRoadmap } from "../src/roadmap-review";
 const r: Roadmap = JSON.parse(readFileSync("public/curriculum.json", "utf8"));
 function revision(raw: string, parent: string, n = 10) {

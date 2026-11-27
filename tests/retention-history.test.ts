@@ -8,7 +8,8 @@ import {
   compileRoadmapAdoption,
   reconcileRoadmap,
 } from "../src/roadmap-adoption";
-import { prepareRoadmapExport, sha256 } from "../src/roadmap-export";
+import { sha256 } from "../src/digest";
+import { prepareRoadmapExport } from "../src/roadmap-export";
 import { inspectMergedDocument } from "../src/roadmap-structure";
 import { createRecord } from "./helpers/record";
 import {

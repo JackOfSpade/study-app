@@ -1,6 +1,9 @@
 import type { LearnerLedger, LearningAttempt } from "./learning-model";
 import type { Roadmap } from "./model";
-import { inspectMergedDocument } from "./roadmap-structure";
+import {
+  inspectMergedDocument,
+  isAssessmentRegisterKey,
+} from "./roadmap-structure";
 import { CELL_SEPARATOR } from "./table-row";
 
 export interface IdentifierCounters {
@@ -11,6 +14,13 @@ export interface IdentifierCounters {
   evidence: Record<string, number>;
 }
 const heading = "S0.7 Shared identifier counters";
+const RESERVED_ROW = "| Reserved next identifiers (shared counters) |";
+/** The untrimmed "Reserved next identifiers" cell of a shared block. */
+const reservedField = (shared: string) =>
+  shared
+    .split("\n")
+    .find((s) => s.startsWith(RESERVED_ROW))
+    ?.split(CELL_SEPARATOR)[2] ?? "";
 const positive = (value: unknown) =>
   typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 function validateIdentifierCounters(c: IdentifierCounters) {
@@ -73,7 +83,9 @@ const next = (n: number) => {
 };
 /** Only actual progress-row identities count as allocated. Curriculum examples,
  * quoted history and the next-counter declaration are not issued tasks. */
-function recordedIdentifierCounters(raw: string): IdentifierCounters {
+function recordedIdentifierCounters(
+  doc: ReturnType<typeof inspectMergedDocument>,
+): IdentifierCounters {
   const c: IdentifierCounters = {
     nextSession: 1,
     nextGap: 1,
@@ -81,13 +93,13 @@ function recordedIdentifierCounters(raw: string): IdentifierCounters {
     attempts: {},
     evidence: {},
   };
-  const doc = inspectMergedDocument(raw),
-    seen = new Set<string>();
+  const seen = new Set<string>();
   for (const [key, line] of doc.rows) {
     const id = line.split(CELL_SEPARATOR)[1]?.trim();
     const formal = /^(S\d{4})-(A|EV)(\d{2,})$/.exec(id);
+    const register = isAssessmentRegisterKey(key);
     if (
-      /\/0\.5(?:\.1)? /.test(key) &&
+      register &&
       /^S\d+-/.test(id) &&
       (!formal ||
         !positive(Number(formal[3])) ||
@@ -95,7 +107,7 @@ function recordedIdentifierCounters(raw: string): IdentifierCounters {
         formatIdentifier(`${formal[1]}-${formal[2]}`, Number(formal[3])) !== id)
     )
       throw Error("Noncanonical assessment identifier in a progress register");
-    if (formal && /\/0\.5(?:\.1)? /.test(key)) {
+    if (formal && register) {
       if (seen.has(id))
         throw Error(`Assessment identifier reused across tracks: ${id}`);
       seen.add(id);
@@ -116,15 +128,7 @@ function recordedIdentifierCounters(raw: string): IdentifierCounters {
   return c;
 }
 function counterClaim(shared: string): IdentifierCounters | undefined {
-  let declared: IdentifierCounters | undefined;
-  const field =
-    shared
-      .split("\n")
-      .find((s) =>
-        s.startsWith("| Reserved next identifiers (shared counters) |"),
-      )
-      ?.split(CELL_SEPARATOR)[2]
-      ?.trim() ?? "";
+  const field = reservedField(shared).trim();
   const portable =
     /^(S\d{4}): next shared attempt (S\d{4})-A(\d+), evidence (S\d{4})-EV(\d+); next gap G(\d+); next shared decision DEC(\d+); next genuinely new session S(\d+)$/.exec(
       field,
@@ -136,37 +140,38 @@ function counterClaim(shared: string): IdentifierCounters | undefined {
   if (portable) {
     if (portable[1] !== portable[2] || portable[1] !== portable[4])
       throw Error("Shared next identifiers name different allocation sessions");
-    declared = {
+    return {
       nextSession: Number(portable[8]),
       nextGap: Number(portable[6]),
       nextDecision: Number(portable[7]),
       attempts: { [portable[1]]: Number(portable[3]) },
       evidence: { [portable[1]]: Number(portable[5]) },
     };
-  } else if (original)
-    declared = {
+  }
+  if (original)
+    return {
       nextSession: Number(original[6]),
       nextGap: Number(original[4]),
       nextDecision: Number(original[5]),
       attempts: { [original[1]]: Number(original[2]) },
       evidence: { [original[1]]: Number(original[3]) },
     };
-  return declared;
+  return undefined;
 }
 /** Exact portable counters; revision9 and earlier app exports retain a bounded
  * legacy reader. An unfamiliar claim needs reconciliation, never a reset. */
-export function readIdentifierCounters(raw: string, strict = true) {
-  const doc = inspectMergedDocument(raw),
-    minimum = recordedIdentifierCounters(raw),
-    shared = doc.blocks.SHARED_PROGRESS;
-  const field =
-    shared
-      .split("\n")
-      .find((s) =>
-        s.startsWith("| Reserved next identifiers (shared counters) |"),
-      )
-      ?.split(CELL_SEPARATOR)[2] ?? "";
-  const prefix = field.split(/\bNext |\bnext shared attempt/)[0];
+export function readIdentifierCounters(
+  raw: string,
+  strict = true,
+  parsed?: ReturnType<typeof inspectMergedDocument>,
+) {
+  const doc = parsed ?? inspectMergedDocument(raw),
+    minimum = recordedIdentifierCounters(doc),
+    shared = doc.blocks.SHARED_PROGRESS,
+    hasTable = shared.includes(`### ${heading}\n`);
+  const prefix = reservedField(shared).split(
+    /\bNext |\bnext shared attempt/,
+  )[0];
   for (const match of prefix.matchAll(
     /(S\d{4})-(A|EV)(\d+)(?:[–-](?:\1-)?(?:A|EV)?(\d+))?/g,
   )) {
@@ -191,7 +196,7 @@ export function readIdentifierCounters(raw: string, strict = true) {
       next(Math.max(Number(m[1]), Number(m[2] ?? m[1]))),
     );
   let declared: IdentifierCounters | undefined;
-  if (shared.includes(`### ${heading}\n`)) {
+  if (hasTable) {
     const section = shared.split(`### ${heading}\n`)[1].split("\n### ")[0];
     const c: IdentifierCounters = {
       nextSession: 1,
@@ -241,7 +246,7 @@ export function readIdentifierCounters(raw: string, strict = true) {
         "Saved identifier counters need exact reconciliation before allocating new study IDs.",
     };
   validateIdentifierCounters(declared);
-  if (shared.includes(`### ${heading}\n`)) {
+  if (hasTable) {
     for (const kind of ["attempts", "evidence"] as const)
       for (const session of Object.keys(minimum[kind]))
         if (declared[kind][session] === undefined)
@@ -288,6 +293,10 @@ export function readIdentifierCounters(raw: string, strict = true) {
     );
   return { counters: merged };
 }
+const allocationSources = new WeakMap<
+  LearnerLedger,
+  { source: string; read: ReturnType<typeof readIdentifierCounters> }
+>();
 export function allocationCounters(
   r: Roadmap,
   l: LearnerLedger,
@@ -319,10 +328,6 @@ export function allocationCounters(
     }
   return c;
 }
-const allocationSources = new WeakMap<
-  LearnerLedger,
-  { source: string; read: ReturnType<typeof readIdentifierCounters> }
->();
 export const formatIdentifier = (prefix: string, n: number, width = 2) => {
   if (!positive(n)) throw Error("Invalid next identifier");
   return `${prefix}${String(n).padStart(width, "0")}`;
@@ -357,8 +362,8 @@ export function projectIdentifierCounters(
   let updated = old
     .split("\n")
     .map((line) =>
-      line.startsWith("| Reserved next identifiers (shared counters) |")
-        ? `| Reserved next identifiers (shared counters) | ${scope}: next shared attempt ${formatIdentifier(`${scope}-A`, c.attempts[scope])}, evidence ${formatIdentifier(`${scope}-EV`, c.evidence[scope])}; next gap ${formatIdentifier("G", c.nextGap, 4)}; next shared decision ${formatIdentifier("DEC", c.nextDecision, 4)}; next genuinely new session ${formatIdentifier("S", c.nextSession, 4)} |`
+      line.startsWith(RESERVED_ROW)
+        ? `${RESERVED_ROW} ${scope}: next shared attempt ${formatIdentifier(`${scope}-A`, c.attempts[scope])}, evidence ${formatIdentifier(`${scope}-EV`, c.evidence[scope])}; next gap ${formatIdentifier("G", c.nextGap, 4)}; next shared decision ${formatIdentifier("DEC", c.nextDecision, 4)}; next genuinely new session ${formatIdentifier("S", c.nextSession, 4)} |`
         : line,
     )
     .join("\n");

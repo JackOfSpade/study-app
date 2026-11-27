@@ -6,19 +6,13 @@
  * valid for a long time (saved exports, adopted uploads, other devices), so
  * every reader accepts both forms and new exports write only the current ones.
  * Keep the compatibility in this one place. */
-export const ASSESSED_TOKEN_PREFIX = "STUDY_AI_ASSESSED_";
+const ASSESSED_TOKEN_PREFIX = "STUDY_AI_ASSESSED_";
 /** Written by exports from earlier builds; read, never newly written. */
-export const LEGACY_ASSESSED_TOKEN_PREFIX = "GAME_AI_ASSESSED_";
-export const ASSESSED_OUTCOMES = [
-  "independent",
-  "assisted",
-  "contradicted",
-  "unknown",
-] as const;
+const LEGACY_ASSESSED_TOKEN_PREFIX = "GAME_AI_ASSESSED_";
 
 export const assessedToken = (outcome: string) =>
   `${ASSESSED_TOKEN_PREFIX}${outcome.toUpperCase()}`;
-export const legacyAssessedToken = (outcome: string) =>
+const legacyAssessedToken = (outcome: string) =>
   `${LEGACY_ASSESSED_TOKEN_PREFIX}${outcome.toUpperCase()}`;
 
 /** True for an app-assessed evidence mode in either the current or legacy form. */

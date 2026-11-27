@@ -21,7 +21,8 @@ import type {
   RoadmapReconciliation,
   RoadmapReconciliationPayload,
 } from "../src/roadmap-adoption-types";
-import { prepareRoadmapExport, sha256 } from "../src/roadmap-export";
+import { sha256 } from "../src/digest";
+import { prepareRoadmapExport } from "../src/roadmap-export";
 import { presentRoadmapReview } from "../src/roadmap-exposure";
 import { createRecord } from "./helpers/record";
 const r: Roadmap = JSON.parse(readFileSync("public/curriculum.json", "utf8"));
