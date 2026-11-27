@@ -8,6 +8,15 @@ const names = [
   "PE_PROGRESS",
   "PE_CURRICULUM",
 ];
+/** Blocks every saved document must carry byte-for-byte from the source. */
+export const PROTECTED_BLOCKS = [
+  "MERGE_RULES",
+  "PY_CURRICULUM",
+  "PE_CURRICULUM",
+] as const;
+/** True for a progress-row key in a 0.5 evidence or 0.5.1 attempt register. */
+export const isAssessmentRegisterKey = (key: string) =>
+  /\/0\.5(?:\.1)? /.test(key);
 export function sourceSessionStatus(value: string) {
   return value.includes("INTERRUPTED_AT_LAST_SAVE")
     ? ("INTERRUPTED_AT_LAST_SAVE" as const)

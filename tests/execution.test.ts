@@ -7,7 +7,7 @@ import { canRunWorkspace, runWorkspace } from "../src/execution";
 import { initialLearner, reconcileGates } from "../src/learner";
 import { type Roadmap } from "../src/model";
 import { decode, encode, recover } from "../src/persistence";
-import { sha256 } from "../src/roadmap-export";
+import { sha256 } from "../src/digest";
 import { createRecord } from "./helpers/record";
 const r: Roadmap = JSON.parse(readFileSync("public/curriculum.json", "utf8"));
 function fixture() {

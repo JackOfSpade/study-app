@@ -14,7 +14,8 @@ import {
 import type { Assessment, Encounter, Roadmap } from "../src/model";
 import { reconcileRoadmap } from "../src/roadmap-adoption";
 import { parseRoadmapDocument } from "../src/roadmap-document";
-import { prepareRoadmapExport, sha256 } from "../src/roadmap-export";
+import { sha256 } from "../src/digest";
+import { prepareRoadmapExport } from "../src/roadmap-export";
 import {
   allocationCounters,
   attemptDisposition,

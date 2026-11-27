@@ -10,7 +10,8 @@ import {
 } from "../src/learner";
 import type { Roadmap } from "../src/model";
 import { parseRoadmapDocument } from "../src/roadmap-document";
-import { prepareRoadmapExport, sha256 } from "../src/roadmap-export";
+import { sha256 } from "../src/digest";
+import { prepareRoadmapExport } from "../src/roadmap-export";
 import { reviewRoadmap } from "../src/roadmap-review";
 import { createRecord } from "./helpers/record";
 const r: Roadmap = JSON.parse(readFileSync("public/curriculum.json", "utf8"));
@@ -90,6 +91,16 @@ test("routine document loading rejects operating-contract changes even when prot
     (await reviewRoadmap(r, r.raw, candidate)).issues.some(
       (i) => i.severity === "invalid",
     ),
+  );
+});
+test("a non-text document is reported as such, not as an oversized one", async () => {
+  await assert.rejects(
+    parseRoadmapDocument(42 as unknown as string, r),
+    /^Error: Roadmap must be text$/,
+  );
+  await assert.rejects(
+    parseRoadmapDocument("x".repeat(2_000_001), r),
+    /2 MB document limit/,
   );
 });
 test("malformed cells, counts, omitted objectives, altered targets, unknown/duplicate/out-of-order queues and false gates cannot be loaded", async () => {

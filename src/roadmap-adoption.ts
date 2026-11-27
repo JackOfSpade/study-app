@@ -60,6 +60,7 @@ import {
 import { reviewRoadmap } from "./roadmap-review";
 import {
   inspectMergedDocument,
+  isAssessmentRegisterKey,
   sourceSessionStatus,
 } from "./roadmap-structure";
 import {
@@ -217,7 +218,7 @@ export async function compileRoadmapAdoption(
   // correction must preserve them and append its disposition, not erase them.
   for (const [key, row] of local.rows)
     if (
-      /\/0\.5(?:\.1)? /.test(key) &&
+      isAssessmentRegisterKey(key) &&
       !key.endsWith("/Evidence ID") &&
       !key.endsWith("/Attempt ID") &&
       !normalized.updated.has(key) &&
@@ -228,7 +229,7 @@ export async function compileRoadmapAdoption(
       );
   for (const [key, row] of incoming.rows)
     if (
-      /\/0\.5(?:\.1)? /.test(key) &&
+      isAssessmentRegisterKey(key) &&
       !key.endsWith("/Evidence ID") &&
       !key.endsWith("/Attempt ID") &&
       !local.rows.has(key) &&
@@ -240,7 +241,7 @@ export async function compileRoadmapAdoption(
       );
   for (const [key, row] of incoming.rows)
     if (
-      /\/0\.5(?:\.1)? /.test(key) &&
+      isAssessmentRegisterKey(key) &&
       local.rows.has(key) &&
       !branches.retained.has(key) &&
       !normalized.updated.has(key) &&
@@ -251,7 +252,7 @@ export async function compileRoadmapAdoption(
       );
   for (const [key, row] of merged.rows)
     if (
-      /\/0\.5(?:\.1)? /.test(key) &&
+      isAssessmentRegisterKey(key) &&
       local.rows.get(key) !== row &&
       incoming.rows.get(key) !== row
     )
