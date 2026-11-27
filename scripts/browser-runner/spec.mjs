@@ -29,7 +29,8 @@ function text(value, limit, label, empty = false) {
   return value;
 }
 export function browserSteps(value = []) {
-  if (!Array.isArray(value) || value.length > 8)
+  if (!Array.isArray(value)) throw Error("Browser checks must be a list");
+  if (value.length > 8)
     throw Error("Browser checks require at most eight steps");
   return value.map((step) => {
     if (

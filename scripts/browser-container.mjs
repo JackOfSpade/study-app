@@ -8,6 +8,8 @@ export const browserLimits = Object.freeze({
   wallTimeMs: 17000,
   outputBytes: 262144,
 });
+export const browserImage = () =>
+  process.env.CODE_RUNNER_REACT_IMAGE ?? "study-browser-runtime:0.1.0";
 export function browserContainerOptions(name) {
   if (!/^study-browser-[a-z0-9-]{1,80}$/.test(name))
     throw Error("Invalid owned browser container name");
@@ -35,10 +37,10 @@ export function browserContainerOptions(name) {
     "--cap-drop=ALL",
     "--security-opt=no-new-privileges",
     `--security-opt=seccomp=${profile}`,
-    "--cpus=0.5",
-    "--memory=512m",
-    "--memory-swap=512m",
-    "--pids-limit=256",
+    `--cpus=${browserLimits.cpus}`,
+    `--memory=${browserLimits.memoryMiB}m`,
+    `--memory-swap=${browserLimits.memoryMiB}m`,
+    `--pids-limit=${browserLimits.processes}`,
     "--ulimit=cpu=15:15",
     "--ulimit=nofile=1024:1024",
     "--ulimit=core=0:0",

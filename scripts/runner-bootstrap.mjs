@@ -17,8 +17,9 @@ sys.stderr.write(${JSON.stringify(marker + "\n")})
 sys.stderr.flush()
 os.execv(sys.executable,[sys.executable,'-I','-B','/work/main.py'])`;
 }
+/** A child killed by a signal exits 128+signo, as the exec'd Python program would. */
 export function nodeBootstrap(marker, language) {
   const extension = language === "typescript" ? "ts" : "mjs";
   return `const fs=require('node:fs'),cp=require('node:child_process');const readPacket=${readPacket.toString()};
-(async()=>{const packet=JSON.parse(await readPacket(process.stdin)),code=Buffer.from(packet.code,'base64');if(code.length>65536)throw Error('Code too large');fs.writeFileSync('/work/main.${extension}',code);fs.writeSync(2,${JSON.stringify(marker + "\n")});const r=cp.spawnSync(process.execPath,['--max-old-space-size=64',${language === "typescript" ? "'--experimental-strip-types'," : ""}'/work/main.${extension}'],{stdio:['ignore','inherit','inherit']});process.exit(r.status??1);})().catch(error=>{console.error(error.message);process.exitCode=1;});`;
+(async()=>{const packet=JSON.parse(await readPacket(process.stdin)),code=Buffer.from(packet.code,'base64');if(code.length>65536)throw Error('Code too large');fs.writeFileSync('/work/main.${extension}',code);fs.writeSync(2,${JSON.stringify(marker + "\n")});const r=cp.spawnSync(process.execPath,['--max-old-space-size=64',${language === "typescript" ? "'--experimental-strip-types'," : ""}'/work/main.${extension}'],{stdio:['ignore','inherit','inherit']});process.exit(r.status??(r.signal?128+require('node:os').constants.signals[r.signal]:1));})().catch(error=>{console.error(error.message);process.exitCode=1;});`;
 }

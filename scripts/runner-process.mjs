@@ -1,14 +1,15 @@
-export { boundedText } from "./runner-output.mjs";
 import { outputCapture } from "./runner-output.mjs";
 import { spawn } from "node:child_process";
 
 export const maxOutput = 65536;
+/** Exit codes of `timeout -s KILL` (124), SIGKILL/OOM (137) and SIGXCPU (152). */
+const limitExitCodes = new Set([124, 137, 152]);
+export const isLimitExit = (exitCode) => limitExitCodes.has(exitCode);
+export const imageIdPattern = /^sha256:[a-f0-9]{64}$/;
+
 export function docker(
   args,
-  input = "",
-  timeout = 5000,
-  onLimit,
-  outputLimit = maxOutput,
+  { input = "", timeout = 5000, onLimit, outputLimit = maxOutput } = {},
 ) {
   return new Promise((resolve) => {
     const child = spawn("docker", args, { stdio: ["pipe", "pipe", "pipe"] });
@@ -28,7 +29,7 @@ export function docker(
     child.stderr.on("data", capture("err"));
     child.stdin.on("error", () => {});
     child.on("error", () => {
-      reason = "unavailable";
+      reason ??= "unavailable";
     });
     child.on("close", (exitCode) => {
       clearTimeout(timer);
@@ -38,3 +39,18 @@ export function docker(
     child.stdin.end(input);
   });
 }
+
+/** The local image's content id, or undefined when Docker or the image is missing. */
+export async function inspectImage(ref) {
+  const image = await docker(["image", "inspect", ref, "--format", "{{.Id}}"]);
+  const imageId = image.stdout.trim();
+  return image.exitCode === 0 && imageIdPattern.test(imageId)
+    ? imageId
+    : undefined;
+}
+
+export const removeContainer = (name) => docker(["rm", "--force", name]);
+
+/** The in-container program wrote its start marker as a whole stderr line. */
+export const sawMarker = (result, marker) =>
+  result.stderrPrefix.split("\n").includes(marker);

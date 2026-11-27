@@ -3,9 +3,17 @@ import {
   pythonBootstrap,
   nodeBootstrap,
 } from "./runner-bootstrap.mjs";
-import { docker, boundedText, maxOutput } from "./runner-process.mjs";
+import {
+  docker,
+  inspectImage,
+  isLimitExit,
+  maxOutput,
+  removeContainer,
+  sawMarker,
+} from "./runner-process.mjs";
 import { executeReact } from "./browser-runner.mjs";
 import { browserSpec } from "./browser-runner/spec.mjs";
+import { HttpInputError } from "./http-json.mjs";
 import { randomUUID } from "node:crypto";
 import { sha256 } from "./lib/digest.mjs";
 
@@ -14,43 +22,67 @@ const images = {
   typescript: process.env.CODE_RUNNER_NODE_IMAGE ?? "node:22",
   javascript: process.env.CODE_RUNNER_NODE_IMAGE ?? "node:22",
 };
+const codeLimits = Object.freeze({
+  memoryMiB: 128,
+  cpus: 0.5,
+  processes: 32,
+  wallTimeMs: 5000,
+  outputBytes: maxOutput,
+});
 let active = false;
-/** No host mounts, shell interpolation, network, or inherited host credentials. */
-export async function executeCode(input) {
+
+/** Rejects a malformed request with 400; returns the validated React spec, if any. */
+function validate(input) {
   if (
     !input ||
     !Object.hasOwn(images, input.language) ||
     typeof input.code !== "string" ||
     Buffer.byteLength(input.code, "utf8") > 65536
   )
-    throw Error("Expected Python, TypeScript or JavaScript code up to 64 KiB");
+    throw new HttpInputError(
+      400,
+      "Expected Python, TypeScript or JavaScript code up to 64 KiB",
+    );
   if (input.environment !== undefined && input.environment !== "react")
-    throw Error("Unsupported execution environment");
-  if (input.environment === "react" && input.language !== "typescript")
-    throw Error("React execution requires TypeScript/TSX");
-  const react =
-    input.environment === "react"
-      ? browserSpec(input.code, input.steps)
-      : undefined;
-  if (active) throw Error("Runner busy; retry when the current run finishes");
+    throw new HttpInputError(400, "Unsupported execution environment");
+  if (input.environment !== "react") return undefined;
+  if (input.language !== "typescript")
+    throw new HttpInputError(400, "React execution requires TypeScript/TSX");
+  try {
+    return browserSpec(input.code, input.steps);
+  } catch (error) {
+    throw new HttpInputError(400, error.message);
+  }
+}
+
+/** No host mounts, shell interpolation, network, or inherited host credentials. */
+export async function executeCode(input) {
+  const react = validate(input);
+  if (active)
+    throw new HttpInputError(
+      409,
+      "Runner busy; retry when the current run finishes",
+    );
   active = true;
+  try {
+    return react
+      ? await executeReact(react, randomUUID())
+      : await executeInterpreter(input);
+  } finally {
+    active = false;
+  }
+}
+
+async function executeInterpreter(input) {
   const id = randomUUID(),
     name = `study-code-${id}`,
     marker = `STUDY_INTERPRETER_${id}`;
   const startedAt = new Date().toISOString(),
     start = performance.now();
-  let imageId;
+  let attemptedCreate = false;
   try {
-    if (react) return await executeReact(react, id);
-    const image = await docker([
-      "image",
-      "inspect",
-      images[input.language],
-      "--format",
-      "{{.Id}}",
-    ]);
-    imageId = image.stdout.trim();
-    if (image.exitCode !== 0 || !/^sha256:[a-f0-9]{64}$/.test(imageId))
+    const imageId = await inspectImage(images[input.language]);
+    if (!imageId)
       return {
         id,
         status: "unavailable",
@@ -70,10 +102,10 @@ export async function executeCode(input) {
       "--cap-drop=ALL",
       "--security-opt=no-new-privileges",
       "--user=65534:65534",
-      "--cpus=0.5",
-      "--memory=128m",
-      "--memory-swap=128m",
-      "--pids-limit=32",
+      `--cpus=${codeLimits.cpus}`,
+      `--memory=${codeLimits.memoryMiB}m`,
+      `--memory-swap=${codeLimits.memoryMiB}m`,
+      `--pids-limit=${codeLimits.processes}`,
       "--ulimit=cpu=3:3",
       "--ulimit=nofile=64:64",
       "--ulimit=core=0:0",
@@ -99,9 +131,8 @@ export async function executeCode(input) {
         "-e",
         nodeBootstrap(marker, input.language),
       );
-    const remove = () => {
-      void docker(["rm", "--force", name]);
-    };
+    // A killed create can still leave a container behind, so flag it first.
+    attemptedCreate = true;
     const created = await docker(args);
     if (created.exitCode !== 0)
       return {
@@ -112,13 +143,12 @@ export async function executeCode(input) {
         detail:
           "The isolated container could not be created; code was not executed.",
       };
-    const result = await docker(
-      ["start", "--attach", "--interactive", name],
-      codePacket(input.code),
-      5000,
-      remove,
-    );
-    const executed = result.stderrPrefix.split("\n").includes(marker);
+    const result = await docker(["start", "--attach", "--interactive", name], {
+      input: codePacket(input.code),
+      timeout: codeLimits.wallTimeMs,
+      onLimit: () => void removeContainer(name),
+    });
+    const executed = sawMarker(result, marker);
     return {
       id,
       language: input.language,
@@ -129,26 +159,15 @@ export async function executeCode(input) {
       status: !executed
         ? "unavailable"
         : (result.reason ??
-          ([124, 137, 152].includes(result.exitCode)
-            ? "resource-limit"
-            : "completed")),
+          (isLimitExit(result.exitCode) ? "resource-limit" : "completed")),
       executed,
       exitCode: result.exitCode,
       stdout: result.stdout,
       stderr: result.stderr.replace(marker + "\n", ""),
-      limits: {
-        network: "none",
-        hostMounts: false,
-        memoryMiB: 128,
-        cpus: 0.5,
-        processes: 32,
-        wallTimeMs: 5000,
-        outputBytes: maxOutput,
-      },
+      limits: { network: "none", hostMounts: false, ...codeLimits },
     };
   } finally {
     // Also clean up after a client/CLI failure or a process that forked children.
-    if (!react) await docker(["rm", "--force", name]);
-    active = false;
+    if (attemptedCreate) await removeContainer(name);
   }
 }

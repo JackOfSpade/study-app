@@ -17,14 +17,8 @@ export async function executionRoute(req, res) {
     res.writeHead(result.status === "unavailable" ? 503 : 200);
     res.end(JSON.stringify(result));
   } catch (error) {
-    const message = String(error);
-    res.writeHead(
-      error instanceof HttpInputError
-        ? error.status
-        : message.includes("Runner busy")
-          ? 409
-          : 400,
-    );
-    res.end(JSON.stringify({ error: message }));
+    // Request and busy errors carry their status; anything else is internal.
+    res.writeHead(error instanceof HttpInputError ? error.status : 500);
+    res.end(JSON.stringify({ error: String(error) }));
   }
 }
