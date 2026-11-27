@@ -8,14 +8,8 @@
  *   --results <results.jsonl> --generate-cases <generate.json> \
  *   --setting <model:effort> --rep <n> --out <dir>
  */
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  writeFileSync,
-} from "node:fs";
-import { join, resolve } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { assess, checkBridge, edit, send } from "../../src/ai";
 import type {
@@ -34,6 +28,17 @@ import {
   withBridge,
   type StudyCase,
 } from "./build-study-cases";
+import {
+  argument,
+  lastValidAnswer,
+  parseLadderSetting,
+  readJsonlRows,
+  topicOf,
+  writeCaseFiles,
+  type LadderRow,
+} from "./case-files";
+
+export type { LadderRow };
 
 /** The one learner turn every downstream tutor case carries. */
 export const TUTOR_MESSAGE =
@@ -41,15 +46,6 @@ export const TUTOR_MESSAGE =
 /** The honest note left in the partial attempt the assess case reviews. */
 export const ASSESS_ATTEMPT_NOTE =
   "# attempt: I handled the main case but have not checked the boundary yet.";
-
-export type LadderRow = {
-  caseId: string;
-  operation: string;
-  setting: string;
-  rep: number;
-  outcome: string;
-  answers?: unknown[];
-};
 
 export type GenerateCase = {
   id: string;
@@ -62,29 +58,6 @@ type DownstreamCaseBook = {
   assess: StudyCase[];
   skipped: string[];
 };
-
-const topicOf = (id: string | undefined) =>
-  id?.split(":")[1]?.split(".")[0] ?? "";
-
-/** The last answer of a valid generate row at exactly this arm and rep. */
-function validAnswer(
-  rows: LadderRow[],
-  caseId: string,
-  setting: string,
-  rep: number,
-) {
-  const row = rows.find(
-    (candidate) =>
-      candidate.caseId === caseId &&
-      candidate.operation === "generate" &&
-      candidate.setting === setting &&
-      candidate.rep === rep &&
-      candidate.outcome === "valid" &&
-      Array.isArray(candidate.answers) &&
-      candidate.answers.length > 0,
-  );
-  return row ? row.answers![row.answers!.length - 1] : undefined;
-}
 
 /** The generated answer as a Problem: everything but `text`, plus provenance. */
 export function problemFrom(answer: unknown): Problem {
@@ -106,13 +79,14 @@ export function problemFrom(answer: unknown): Problem {
 
 /**
  * A record and encounter built exactly the way buildTutor/buildAssess build
- * them, except that the problem is the generated one. The scenario and seed
- * follow the generate case's index, so an arm's cases stay reproducible.
+ * them, except that the problem is the generated one. The scenario and
+ * encounter follow the generate case's index, so an arm's cases stay
+ * reproducible.
  */
 function encounterForProblem(r: Roadmap, index: number, problem: Problem) {
   const generated = problem.contract;
-  const scenario = scenarioFor(r, generated, index);
-  const g = recordFor(20261200 + index, r);
+  const scenario = scenarioFor(generated, index);
+  const g = recordFor(r);
   const e = encounterFor(g, index);
   const scheduled = contractFor(
     g,
@@ -226,7 +200,12 @@ export async function buildDownstreamCases({
   );
   const book: DownstreamCaseBook = { tutor: [], assess: [], skipped: [] };
   for (const [index, generateCase] of generateCases.entries()) {
-    const answer = validAnswer(rows, generateCase.id, setting, rep);
+    const answer = lastValidAnswer(rows, {
+      caseId: generateCase.id,
+      operation: "generate",
+      setting,
+      rep,
+    });
     if (answer === undefined) {
       book.skipped.push(generateCase.id);
       continue;
@@ -248,66 +227,44 @@ export async function buildDownstreamCases({
   return book;
 }
 
-/** Write tutor.json and assess.json with the same permissions as study cases. */
-async function writeDownstreamCases(
+/**
+ * Write tutor.json and assess.json with the same permissions as study cases.
+ * A run that pairs no generate row writes nothing, so a typo'd setting or
+ * wrong rep never replaces earlier cases with empty files.
+ */
+export async function writeDownstreamCases(
   out: string,
+  results: string,
   options: BuildDownstreamOptions,
 ) {
   const book = await buildDownstreamCases(options);
-  const target = resolve(out);
-  mkdirSync(target, { recursive: true, mode: 0o700 });
-  chmodSync(target, 0o700);
-  for (const operation of ["tutor", "assess"] as const) {
-    const file = join(target, `${operation}.json`);
-    writeFileSync(file, `${JSON.stringify(book[operation], null, 2)}\n`, {
-      mode: 0o600,
-    });
-    chmodSync(file, 0o600);
-  }
+  if (book.tutor.length === 0)
+    throw Error(
+      `No valid generate rows in ${results} paired with these generate cases at ${options.setting} rep ${options.rep}; nothing written.`,
+    );
+  writeCaseFiles(out, { "tutor.json": book.tutor, "assess.json": book.assess });
   return book;
-}
-
-function argument(name: string, fallback?: string) {
-  const at = process.argv.indexOf(name);
-  if (at === -1) return fallback;
-  const value = process.argv[at + 1];
-  if (!value) throw Error(`${name} needs a value`);
-  return value;
-}
-
-function parseRows(file: string): LadderRow[] {
-  const rows: LadderRow[] = [];
-  for (const [index, line] of readFileSync(resolve(file), "utf8")
-    .split("\n")
-    .entries()) {
-    if (!line.trim()) continue;
-    try {
-      rows.push(JSON.parse(line) as LadderRow);
-    } catch {
-      throw Error(`${file}:${index + 1} is not valid JSONL`);
-    }
-  }
-  return rows;
 }
 
 const entry = process.argv[1] && resolve(process.argv[1]);
 if (entry === fileURLToPath(import.meta.url)) {
   const resultsFile = argument("--results");
   const generateFile = argument("--generate-cases");
-  const setting = argument("--setting");
+  const settingText = argument("--setting");
   const repText = argument("--rep");
   const out = argument("--out", ".local/ai-downstream")!;
-  if (!resultsFile || !generateFile || !setting || !repText)
+  if (!resultsFile || !generateFile || !settingText || !repText)
     throw Error(
       "--results, --generate-cases, --setting and --rep are all required",
     );
   if (!existsSync(resultsFile)) throw Error(`Missing ${resultsFile}`);
   if (!existsSync(generateFile)) throw Error(`Missing ${generateFile}`);
+  const { setting } = parseLadderSetting(settingText);
   const rep = Number(repText);
   if (!Number.isInteger(rep) || rep < 0)
     throw Error(`--rep must be an integer`);
-  writeDownstreamCases(out, {
-    rows: parseRows(resultsFile),
+  writeDownstreamCases(out, resultsFile, {
+    rows: readJsonlRows(resultsFile),
     generateCases: JSON.parse(
       readFileSync(resolve(generateFile), "utf8"),
     ) as GenerateCase[],

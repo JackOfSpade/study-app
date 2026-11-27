@@ -19,14 +19,13 @@ import { fileURLToPath } from "node:url";
 import type { Roadmap } from "../../src/model";
 import { reconcileRoadmap } from "../../src/roadmap-adoption";
 import { createRecord } from "../../tests/helpers/record";
+import { KEEP_LOCAL } from "../lib/roadmap-edits.mjs";
 import {
   loadRoadmap,
   RECONCILE_OPERATION,
   type RoadmapCase,
 } from "./build-roadmap-cases";
-
-/** Must match `KEEP_LOCAL` in scripts/lib/roadmap-edits.mjs. */
-const KEEP_LOCAL = "keep-local";
+import { argument } from "./case-files";
 
 type ReplyClassification = "adoptable" | "rejected" | "keep-local";
 
@@ -240,14 +239,6 @@ export function readCaseFile(file: string): RoadmapCase[] {
   const parsed: unknown = JSON.parse(readFileSync(resolve(file), "utf8"));
   if (!Array.isArray(parsed)) throw Error(`${file} must hold a case array`);
   return parsed as RoadmapCase[];
-}
-
-function argument(name: string) {
-  const at = process.argv.indexOf(name);
-  if (at === -1) return undefined;
-  const value = process.argv[at + 1];
-  if (!value) throw Error(`${name} needs a value`);
-  return value;
 }
 
 const entry = process.argv[1] ? resolve(process.argv[1]) : "";

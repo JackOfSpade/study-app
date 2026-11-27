@@ -5,6 +5,7 @@
 import { readFileSync } from "node:fs";
 import { basename } from "node:path";
 import { pathToFileURL } from "node:url";
+import { isNumber, percentile } from "../lib/measure.mjs";
 
 const FENCE = /^\s*(```|~~~)/;
 const BULLET = /^\s*(?:[-*+]|\d+[.)])\s+\S/;
@@ -27,7 +28,6 @@ const METRICS = [
 ];
 
 const words = (text) => text.split(/\s+/).filter(Boolean).length;
-const isNumber = (value) => typeof value === "number" && Number.isFinite(value);
 
 /** Splits markdown into the lines outside fences and the lines inside them. */
 function splitFences(text) {
@@ -77,7 +77,7 @@ export function questionMetrics(problem) {
       sum + (Array.isArray(scope?.facets) ? scope.facets.length : 0),
     0,
   );
-  const prose2 = [
+  const proseSections = [
     shared,
     ...parts.map((part) => splitFences(part).prose.join("\n")),
   ];
@@ -101,7 +101,7 @@ export function questionMetrics(problem) {
         .map((line) => words(line)),
     ),
     facetCount,
-    perItemJustification: prose2.some(hasPerItemJustification),
+    perItemJustification: proseSections.some(hasPerItemJustification),
     estimatedSolveSeconds: isNumber(problem?.estimatedSolveSeconds)
       ? problem.estimatedSolveSeconds
       : null,
@@ -114,13 +114,6 @@ export function questionMetrics(problem) {
         ? Math.max(...problem.partSolveSeconds)
         : null,
   };
-}
-
-/** Nearest-rank percentile over the measured values, or null when none. */
-function percentile(values, p) {
-  if (!values.length) return null;
-  const sorted = [...values].sort((a, b) => a - b);
-  return sorted[Math.max(0, Math.ceil((p / 100) * sorted.length) - 1)];
 }
 
 /** Per-metric median, p90 and max over metric rows, plus how many rows ask
@@ -205,7 +198,8 @@ function main(files) {
     console.error(
       "Usage: node scripts/ai-capture/question-metrics.mjs <file.jsonl> [more files]",
     );
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
   for (const file of files) {
     const rows = rowsFromJsonl(readFileSync(file, "utf8"));

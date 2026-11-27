@@ -22,8 +22,8 @@
  * and a near-identical revision.
  */
 import { createHash } from "node:crypto";
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   applyLearningAssessment,
@@ -32,12 +32,14 @@ import {
   encounterKey,
   registerScopes,
 } from "../../src/learner";
+import { scopeKey } from "../../src/learning-model";
 import type { Roadmap } from "../../src/model";
 import { reconcileRoadmap } from "../../src/roadmap-adoption";
 import type { RoadmapReconciliation } from "../../src/roadmap-adoption-types";
 import { prepareRoadmapExport } from "../../src/roadmap-export";
 import { createRecord } from "../../tests/helpers/record";
 import { CELL_SEPARATOR } from "../../src/table-row";
+import { argument, writeCaseFiles } from "./case-files";
 
 export const RECONCILE_OPERATION = "reconcile-roadmap" as const;
 const DEFAULT_COUNT = 6;
@@ -61,7 +63,10 @@ type RoadmapExpectation = Pick<
   "definitions" | "mappings" | "completeScopes"
 >;
 
-const ROADMAP_FILE = "public/curriculum.json";
+/** The checked-in roadmap, wherever the builder is run from. */
+const ROADMAP_FILE = fileURLToPath(
+  new URL("../../public/curriculum.json", import.meta.url),
+);
 
 /** Split into lines, run one row-level edit, and rejoin. */
 function rows(text: string, edit: (lines: string[]) => void) {
@@ -470,23 +475,14 @@ export function loadRoadmap(file = ROADMAP_FILE): Roadmap {
   return JSON.parse(readFileSync(resolve(file), "utf8")) as Roadmap;
 }
 
+/**
+ * The payload `reconcileRoadmap` sends for this candidate, captured by an
+ * intercepted requester on a fresh live record. No provider is contacted.
+ */
 async function capturePayload(
   roadmap: Roadmap,
   candidate: string,
 ): Promise<RoadmapPayload> {
-  const { payload } = await openReconciliation(roadmap, candidate);
-  return payload;
-}
-
-/**
- * Start a reconciliation with an intercepted requester and hand back both the
- * captured payload and the record that owns it, so a caller can resume the same
- * saved request offline. No provider is contacted.
- */
-async function openReconciliation(
-  roadmap: Roadmap,
-  candidate: string,
-): Promise<{ g: ReturnType<typeof createRecord>; payload: RoadmapPayload }> {
   const g = createRecord(7, roadmap);
   g.study.profile = "live";
   let payload: unknown;
@@ -496,41 +492,62 @@ async function openReconciliation(
   });
   if (!payload)
     throw Error("reconcileRoadmap never reached its request stage; no payload");
-  return { g, payload: payload as RoadmapPayload };
+  return payload as RoadmapPayload;
 }
 
-/** Build one adopt case per recipe: the candidate changes administrative rows only. */
-export async function buildAdoptCases({
-  roadmap,
-}: { roadmap?: Roadmap } = {}): Promise<RoadmapCase[]> {
-  const base = roadmap ?? loadRoadmap();
+/**
+ * One case per recipe: each candidate is revised as a sibling of the local
+ * roadmap, must differ from it, and must yield a payload no earlier recipe
+ * produced. `label` names the recipes in errors ("Recipe", "Adopt recipe").
+ */
+async function captureRecipeCases<R extends RoadmapRecipe>(
+  base: Roadmap,
+  recipes: readonly R[],
+  {
+    candidateFor,
+    idPrefix,
+    label,
+  }: {
+    candidateFor: (raw: string, recipe: R) => string;
+    idPrefix: string;
+    label: string;
+  },
+): Promise<RoadmapCase[]> {
   const seen = new Map<string, string>();
   const cases: RoadmapCase[] = [];
-  for (const recipe of ADOPT_RECIPES) {
+  for (const recipe of recipes) {
     // A fresh copy keeps one case's learner state out of the next payload.
     const local: Roadmap = JSON.parse(JSON.stringify(base)) as Roadmap;
-    const candidate = revise(
-      recordAdministrativeRevision(local.raw, recipe),
-      local.sourceHash,
-    );
+    const candidate = revise(candidateFor(local.raw, recipe), local.sourceHash);
     if (candidate === local.raw)
-      throw Error(`Adopt recipe ${recipe.id} produced an unchanged candidate`);
+      throw Error(`${label} ${recipe.id} produced an unchanged candidate`);
     const payload = await capturePayload(local, candidate);
     const hash = createHash("sha256")
       .update(JSON.stringify([payload.local, payload.candidate]))
       .digest("hex");
     if (seen.has(hash))
       throw Error(
-        `Adopt recipes ${seen.get(hash)} and ${recipe.id} produced the same payload`,
+        `${label}s ${seen.get(hash)} and ${recipe.id} produced the same payload`,
       );
     seen.set(hash, recipe.id);
     cases.push({
-      id: `${RECONCILE_OPERATION}-adopt-${recipe.id}`,
+      id: `${idPrefix}${recipe.id}`,
       operation: RECONCILE_OPERATION,
       payload,
     });
   }
   return cases;
+}
+
+/** Build one adopt case per recipe: the candidate changes administrative rows only. */
+export async function buildAdoptCases({
+  roadmap,
+}: { roadmap?: Roadmap } = {}): Promise<RoadmapCase[]> {
+  return captureRecipeCases(roadmap ?? loadRoadmap(), ADOPT_RECIPES, {
+    candidateFor: recordAdministrativeRevision,
+    idPrefix: `${RECONCILE_OPERATION}-adopt-`,
+    label: "Adopt recipe",
+  });
 }
 
 export const ADOPT_FILE = `${RECONCILE_OPERATION}-adopt.json`;
@@ -544,28 +561,12 @@ export async function writeAdoptCases(
     ...(await buildAdoptCases()),
     ...(await buildProgressAdoptCases()),
   ];
-  const target = resolve(out);
-  mkdirSync(target, { recursive: true, mode: 0o700 });
-  chmodSync(target, 0o700);
-  const file = join(target, ADOPT_FILE);
-  writeFileSync(file, `${JSON.stringify(cases, null, 2)}\n`, { mode: 0o600 });
-  chmodSync(file, 0o600);
-  const indexFile = join(target, "index.json");
-  let index: Record<string, number> = {};
-  try {
-    const existing: unknown = JSON.parse(readFileSync(indexFile, "utf8"));
-    if (!existing || typeof existing !== "object" || Array.isArray(existing))
-      throw Error("index.json must hold an operation -> count object");
-    index = existing as Record<string, number>;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-  }
-  index[`${RECONCILE_OPERATION}-adopt`] = cases.length;
-  writeFileSync(indexFile, `${JSON.stringify(index, null, 2)}\n`, {
-    mode: 0o600,
-  });
-  chmodSync(indexFile, 0o600);
-  return { cases, index };
+  const { index } = writeCaseFiles(
+    out,
+    { [ADOPT_FILE]: cases },
+    { [`${RECONCILE_OPERATION}-adopt`]: cases.length },
+  );
+  return { cases, index: index as Record<string, number> };
 }
 
 /** Build `count` distinct reconcile-roadmap payloads without any network. */
@@ -579,31 +580,11 @@ export async function buildRoadmapCases({
     throw Error(
       `Only ${RECIPES.length} reconcile-roadmap conflict recipes exist; asked for ${count}`,
     );
-  const base = roadmap ?? loadRoadmap();
-  const seen = new Map<string, string>();
-  const cases: RoadmapCase[] = [];
-  for (const recipe of RECIPES.slice(0, count)) {
-    // A fresh copy keeps one case's learner state out of the next payload.
-    const local: Roadmap = JSON.parse(JSON.stringify(base)) as Roadmap;
-    const candidate = revise(recipe.edit(local.raw), local.sourceHash);
-    if (candidate === local.raw)
-      throw Error(`Recipe ${recipe.id} produced an unchanged candidate`);
-    const payload = await capturePayload(local, candidate);
-    const hash = createHash("sha256")
-      .update(JSON.stringify([payload.local, payload.candidate]))
-      .digest("hex");
-    if (seen.has(hash))
-      throw Error(
-        `Recipes ${seen.get(hash)} and ${recipe.id} produced the same payload`,
-      );
-    seen.set(hash, recipe.id);
-    cases.push({
-      id: `${RECONCILE_OPERATION}-${recipe.id}`,
-      operation: RECONCILE_OPERATION,
-      payload,
-    });
-  }
-  return cases;
+  return captureRecipeCases(roadmap ?? loadRoadmap(), RECIPES.slice(0, count), {
+    candidateFor: (raw, recipe) => recipe.edit(raw),
+    idPrefix: `${RECONCILE_OPERATION}-`,
+    label: "Recipe",
+  });
 }
 
 /** Write the reconcile-roadmap case file and merge the shared count index. */
@@ -612,67 +593,12 @@ export async function writeRoadmapCases(
   count = DEFAULT_COUNT,
 ): Promise<{ cases: RoadmapCase[]; index: Record<string, number> }> {
   const cases = await buildRoadmapCases({ count });
-  const target = resolve(out);
-  mkdirSync(target, { recursive: true, mode: 0o700 });
-  chmodSync(target, 0o700);
-  const file = join(target, `${RECONCILE_OPERATION}.json`);
-  writeFileSync(file, `${JSON.stringify(cases, null, 2)}\n`, { mode: 0o600 });
-  chmodSync(file, 0o600);
-  const indexFile = join(target, "index.json");
-  let index: Record<string, number> = {};
-  try {
-    const existing: unknown = JSON.parse(readFileSync(indexFile, "utf8"));
-    if (!existing || typeof existing !== "object" || Array.isArray(existing))
-      throw Error("index.json must hold an operation -> count object");
-    index = existing as Record<string, number>;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-  }
-  index[RECONCILE_OPERATION] = cases.length;
-  writeFileSync(indexFile, `${JSON.stringify(index, null, 2)}\n`, {
-    mode: 0o600,
-  });
-  chmodSync(indexFile, 0o600);
-  return { cases, index };
-}
-
-function argument(name: string, fallback?: string) {
-  const at = process.argv.indexOf(name);
-  if (at === -1) return fallback;
-  const value = process.argv[at + 1];
-  if (!value) throw Error(`${name} needs a value`);
-  return value;
-}
-
-const entry = process.argv[1] ? resolve(process.argv[1]) : "";
-if (entry === fileURLToPath(import.meta.url)) {
-  const out = argument("--out", ".local/ai-cases")!;
-  const set = argument("--set", "default");
-  if (set !== "default" && set !== "adopt")
-    throw Error(
-      `--set must be "default" or "adopt" (got ${JSON.stringify(set)})`,
-    );
-  const count = Number(argument("--count", String(DEFAULT_COUNT)));
-  const written =
-    set === "adopt" ? writeAdoptCases(out) : writeRoadmapCases(out, count);
-  written.then(
-    ({ cases, index }) => {
-      const characters = cases.reduce(
-        (sum, item) =>
-          sum +
-          String(item.payload.local).length +
-          String(item.payload.candidate).length,
-        0,
-      );
-      console.log(
-        `Wrote ${cases.length} ${set === "adopt" ? `${RECONCILE_OPERATION}-adopt` : RECONCILE_OPERATION} cases to ${resolve(out)} (${characters} local+candidate characters); index: ${JSON.stringify(index)}.`,
-      );
-    },
-    (error) => {
-      console.error(error);
-      process.exitCode = 1;
-    },
+  const { index } = writeCaseFiles(
+    out,
+    { [`${RECONCILE_OPERATION}.json`]: cases },
+    { [RECONCILE_OPERATION]: cases.length },
   );
+  return { cases, index: index as Record<string, number> };
 }
 
 /** A fresh live record, mirroring the study fixture the reference test proves. */
@@ -704,7 +630,7 @@ async function studiedProgressFile(roadmap: Roadmap, rounds: number) {
       provenance: "study-mode",
       contract: c,
       scopeDefinitions: c.objectiveIds.map((id) => ({
-        id: `${id}/D${c.depth}`,
+        id: scopeKey(id, c.depth),
         objectiveId: id,
         depth: c.depth,
         sourceScope: c.scopes[c.objectiveIds.indexOf(id)],
@@ -772,7 +698,7 @@ async function studiedProgressFile(roadmap: Roadmap, rounds: number) {
         .slice(1, -1)
         .map((v) => v.trim());
       return {
-        scopeId: `${ev.objectiveId}/D${ev.depth}`,
+        scopeId: scopeKey(ev.objectiveId, ev.depth),
         facet: ev.facet,
         outcome: "independent" as const,
         evidenceIds: [ev.id],
@@ -826,4 +752,36 @@ export async function buildProgressAdoptCases({
     });
   }
   return cases;
+}
+
+// The CLI runs last, once every recipe table above is initialised.
+const entry = process.argv[1] ? resolve(process.argv[1]) : "";
+if (entry === fileURLToPath(import.meta.url)) {
+  const out = argument("--out", ".local/ai-cases")!;
+  const set = argument("--set", "default");
+  if (set !== "default" && set !== "adopt")
+    throw Error(
+      `--set must be "default" or "adopt" (got ${JSON.stringify(set)})`,
+    );
+  const count = Number(argument("--count", String(DEFAULT_COUNT)));
+  const written =
+    set === "adopt" ? writeAdoptCases(out) : writeRoadmapCases(out, count);
+  written.then(
+    ({ cases, index }) => {
+      const characters = cases.reduce(
+        (sum, item) =>
+          sum +
+          String(item.payload.local).length +
+          String(item.payload.candidate).length,
+        0,
+      );
+      console.log(
+        `Wrote ${cases.length} ${set === "adopt" ? `${RECONCILE_OPERATION}-adopt` : RECONCILE_OPERATION} cases to ${resolve(out)} (${characters} local+candidate characters); index: ${JSON.stringify(index)}.`,
+      );
+    },
+    (error) => {
+      console.error(error);
+      process.exitCode = 1;
+    },
+  );
 }

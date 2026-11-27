@@ -21,14 +21,7 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-
-const isNumber = (value) => typeof value === "number" && Number.isFinite(value);
-
-/** Sum of the known numbers, or null when there is none. */
-const sumKnown = (values) => {
-  const known = values.filter(isNumber);
-  return known.length ? known.reduce((total, value) => total + value, 0) : null;
-};
+import { isNumber, sumKnown } from "../lib/measure.mjs";
 
 /** The last answer of a valid row, or undefined when the piece is missing. */
 export function lastAnswer(row) {

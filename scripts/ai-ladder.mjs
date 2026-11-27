@@ -13,16 +13,55 @@ import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createClaudeGateway, taskProfile } from "./claude-gateway.mjs";
+import { isNumber, mean, percentile, sumKnown } from "./lib/measure.mjs";
 import { privateDirectory } from "./lib/private-fs.mjs";
+
+export { percentile };
 
 const MODELS = ["haiku", "sonnet", "opus"];
 const EFFORTS = ["low", "medium", "high", "xhigh"];
-const isNumber = (value) => typeof value === "number" && Number.isFinite(value);
-const sumKnown = (values) => {
-  const known = values.filter(isNumber);
-  return known.length ? known.reduce((total, value) => total + value, 0) : null;
+
+/** One arm's identity: case, setting and rep. A judgment shares its row's key. */
+export const rowKey = ({ caseId, setting, rep }) =>
+  `${caseId}\u0000${setting}\u0000${rep}`;
+
+/** Outcomes that say the host could not run the arm (out of usage, signed
+ * out, no CLI), not that the setting answered badly. Such a row stays in
+ * results.jsonl but never counts as finished: a resumed run retries it. */
+export const HOST_FAILURES = new Set([
+  "usage-limit",
+  "not-signed-in",
+  "cli-missing",
+]);
+
+const HOST_FAILURE_LABELS = {
+  "usage-limit": "Usage limit reached",
+  "not-signed-in": "The Claude CLI is not signed in",
+  "cli-missing": "The Claude CLI was not found",
 };
-const resumeKey = (row) => `${row.caseId}\u0000${row.setting}\u0000${row.rep}`;
+
+/** The newest row per arm with host failures left out, so a retried arm
+ * supersedes its failed row and a host problem never scores the setting. */
+export function latestRows(rows) {
+  const latest = new Map();
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (!row || HOST_FAILURES.has(row.outcome)) continue;
+    const key = rowKey(row);
+    latest.delete(key);
+    latest.set(key, row);
+  }
+  return [...latest.values()];
+}
+
+/** A comma list (or an array) as trimmed, non-empty entries. */
+export function parseList(value) {
+  const list = Array.isArray(value)
+    ? value
+    : value === undefined || value === null
+      ? []
+      : String(value).split(",");
+  return list.map((entry) => String(entry).trim()).filter(Boolean);
+}
 
 /** `model:effort`, refusing anything production never offers (e.g. `max`). */
 export function parseSetting(value) {
@@ -207,12 +246,12 @@ export async function runLadder({
   const limit = Math.max(1, Math.floor(Number(parallel)) || 1);
   privateDirectory(out);
   const resultsFile = join(out, "results.jsonl");
-  const done = new Set(readLadderRows(out).map(resumeKey));
-  const wanted = new Set(
-    (Array.isArray(only) ? only : String(only ?? "").split(","))
-      .map((entry) => String(entry).trim())
-      .filter(Boolean),
+  const done = new Set(
+    readLadderRows(out)
+      .filter((row) => !HOST_FAILURES.has(row.outcome))
+      .map(rowKey),
   );
+  const wanted = new Set(parseList(only));
   const stamp = new Date(now()).toISOString().replace(/[:.]/g, "-");
   const ladderId = runId ?? `${name ?? "ladder"}-${stamp}`;
   const jobs = [];
@@ -271,17 +310,26 @@ export async function runLadder({
       const job = jobs[next++];
       if (!job) return;
       if (
-        done.has(`${job.entry.id}\u0000${job.setting.setting}\u0000${job.rep}`)
+        done.has(
+          rowKey({
+            caseId: job.entry.id,
+            setting: job.setting.setting,
+            rep: job.rep,
+          }),
+        )
       )
         continue;
       const row = await runArm(job);
       appendFileSync(resultsFile, `${JSON.stringify(row)}\n`, { mode: 0o600 });
       rows.push(row);
-      if (row.outcome === "usage-limit") {
+      if (HOST_FAILURES.has(row.outcome)) {
+        // An arm another worker had in flight may fail the same way; only the
+        // first stop is reported.
+        if (!stopped)
+          log(
+            `${HOST_FAILURE_LABELS[row.outcome]} on ${row.caseId} (${row.setting}); stopping. New rows: ${rows.length}. Resume later with the same --out.`,
+          );
         stopped = true;
-        log(
-          `Usage limit reached on ${row.caseId} (${row.setting}); stopping. New rows: ${rows.length}. Resume later with the same --out.`,
-        );
         return;
       }
     }
@@ -292,18 +340,11 @@ export async function runLadder({
   return { runId: ladderId, out, resultsFile, rows };
 }
 
-/** Nearest-rank percentile over the measured values, or null when none. */
-export function percentile(values, p) {
-  const sorted = values.filter(isNumber).sort((a, b) => a - b);
-  if (!sorted.length) return null;
-  const rank = Math.ceil((p / 100) * sorted.length);
-  return sorted[Math.min(sorted.length - 1, Math.max(0, rank - 1))];
-}
-
-/** Per operation × setting: reliability, retry-inclusive cost and speed. */
+/** Per operation × setting: reliability, retry-inclusive cost and speed over
+ * the newest row per arm (host failures left out). */
 export function summarizeLadder(rows) {
   const groups = new Map();
-  for (const row of Array.isArray(rows) ? rows : []) {
+  for (const row of latestRows(rows)) {
     const key = `${row.operation}\u0000${row.setting}`;
     const group = groups.get(key) ?? {
       operation: row.operation,
@@ -327,9 +368,7 @@ export function summarizeLadder(rows) {
       firstTryRate:
         group.filter((row) => row.outcome === "valid" && row.corrections === 0)
           .length / n,
-      meanCostUsd: costs.some(isNumber)
-        ? sumKnown(costs) / costs.filter(isNumber).length
-        : null,
+      meanCostUsd: mean(costs),
       p50DurationMs: percentile(durations, 50),
       p95DurationMs: percentile(durations, 95),
       p95FirstTextMs: percentile(firsts, 95),
@@ -409,7 +448,11 @@ export function parseArgs(argv) {
       args._.push(token);
       continue;
     }
-    const [flag, inline] = token.slice(2).split("=");
+    // Only the first "=" ends the flag name, so a value may contain "=".
+    const body = token.slice(2);
+    const at = body.indexOf("=");
+    const flag = at === -1 ? body : body.slice(0, at);
+    const inline = at === -1 ? undefined : body.slice(at + 1);
     if (["json", "ephemeral"].includes(flag)) {
       args[flag] = true;
       continue;

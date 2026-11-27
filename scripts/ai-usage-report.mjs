@@ -1,21 +1,12 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { isNumber, mean, percentile, sumKnown } from "./lib/measure.mjs";
 
-const DEFAULT_LOG = ".local/bridge-service/claude-usage.jsonl";
-const isNumber = (value) => typeof value === "number" && Number.isFinite(value);
-const mean = (values) =>
-  values.length
-    ? values.reduce((sum, value) => sum + value, 0) / values.length
-    : null;
-const sum = (values) => values.reduce((total, value) => total + value, 0);
-/** Nearest-rank percentile: the smallest value at or above p% of the sample. */
-function percentile(values, p) {
-  if (!values.length) return null;
-  const sorted = [...values].sort((a, b) => a - b);
-  const rank = Math.ceil((p / 100) * sorted.length) - 1;
-  return sorted[Math.min(Math.max(rank, 0), sorted.length - 1)];
-}
+/** The bridge's log in this checkout, wherever the report is run from. */
+const DEFAULT_LOG = fileURLToPath(
+  new URL("../.local/bridge-service/claude-usage.jsonl", import.meta.url),
+);
 
 /** Reads the JSONL logs, skipping and counting lines that are not rows. */
 export function readUsageRows(paths) {
@@ -96,7 +87,7 @@ export function summarizeUsage(rows) {
         group.firstTry === 0 ? null : group.firstTryAccepted / group.firstTry,
       correctionTurns: group.correctionTurns,
       failures: group.failures,
-      totalCostUsd: costs.length ? sum(costs) : null,
+      totalCostUsd: sumKnown(costs),
       meanCostUsd: mean(costs),
       meanInputTokens: mean(inputs),
       meanOutputTokens: mean(outputs),
@@ -187,19 +178,24 @@ export function formatUsageReport({
 }
 
 function defaultPaths() {
-  const main = resolve(DEFAULT_LOG);
-  return existsSync(`${main}.1`) ? [`${main}.1`, main] : [main];
+  return existsSync(`${DEFAULT_LOG}.1`)
+    ? [`${DEFAULT_LOG}.1`, DEFAULT_LOG]
+    : [DEFAULT_LOG];
 }
 
 function main(argv) {
-  const paths = argv.filter((arg) => !arg.startsWith("--"));
-  const { rows, malformed, files } = readUsageRows(
-    paths.length ? paths.map((path) => resolve(path)) : defaultPaths(),
-  );
+  const named = argv.filter((arg) => !arg.startsWith("--"));
+  const paths = named.length
+    ? named.map((path) => resolve(path))
+    : defaultPaths();
+  const { rows, malformed, files } = readUsageRows(paths);
   const report = summarizeUsage(rows);
-  if (argv.includes("--json"))
+  if (argv.includes("--json")) {
     console.log(JSON.stringify({ ...report, malformed, files }, null, 2));
-  else console.log(formatUsageReport({ ...report, malformed, files }));
+    return;
+  }
+  console.log(formatUsageReport({ ...report, malformed, files }));
+  if (!files.length) console.log(`No usage log found at ${paths.join(", ")}`);
 }
 
 if (

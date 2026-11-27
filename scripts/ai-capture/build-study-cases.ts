@@ -8,26 +8,23 @@
  * tsx scripts/ai-capture/build-study-cases.ts --out <dir> [--per-op N]
  */
 import { createHash } from "node:crypto";
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  writeFileSync,
-} from "node:fs";
+import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { assess, checkBridge, edit, ensureProblem, send } from "../../src/ai";
 import { eligible, initialStudy } from "../../src/curriculum";
+import { encounterKey } from "../../src/learner";
 import { scopeKey, type ScopeDefinition } from "../../src/learning-model";
 import type {
   Contract,
+  Encounter,
   StudyRecord,
   Problem,
   Roadmap,
   Track,
 } from "../../src/model";
 import { createRecord } from "../../tests/helpers/record";
+import { argument, topicOf, writeCaseFiles } from "./case-files";
 
 type StudyOperation = "generate" | "tutor" | "assess";
 export type StudyCase = {
@@ -339,12 +336,11 @@ const SCENARIOS: Scenario[] = [
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 export const roadmap = (): Roadmap =>
   JSON.parse(readFileSync(join(ROOT, "public/curriculum.json"), "utf8"));
-const topicOf = (id: string) => id.split(":")[1]?.split(".")[0] ?? "";
 const HASH = (value: unknown) =>
   createHash("sha256").update(JSON.stringify(value)).digest("hex");
 
 type Reply = Record<string, unknown>;
-type Handler = (operation: string, payload: any) => Reply;
+type Handler = (operation: string, payload: Record<string, any>) => Reply;
 
 function response(value: unknown) {
   return new Response(JSON.stringify(value), {
@@ -356,8 +352,8 @@ function response(value: unknown) {
 /** The bridge is the only transport: every other fetch fails, so no network. */
 async function withBridge(handler: Handler, run: () => Promise<void>) {
   const original = globalThis.fetch;
-  globalThis.fetch = (async (input: any, init?: RequestInit) => {
-    const url = String(input?.url ?? input);
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = input instanceof Request ? input.url : String(input);
     if (url.endsWith("/api/status"))
       return response({
         mode: "claude-cli",
@@ -378,9 +374,10 @@ async function withBridge(handler: Handler, run: () => Promise<void>) {
   }
 }
 
-function recordFor(seed: number, r: Roadmap) {
-  const g = createRecord(seed, r, initialStudy(r, "live"));
-  return g;
+/** A fresh live study record with twelve unasked questions. Every one is the
+ * same, so cases differ only by what the builders seed into them. */
+function recordFor(r: Roadmap) {
+  return createRecord(0, r, initialStudy(r, "live"));
 }
 
 function encounterFor(g: StudyRecord, index: number) {
@@ -395,7 +392,7 @@ function encounterFor(g: StudyRecord, index: number) {
 function contractFor(
   g: StudyRecord,
   r: Roadmap,
-  scenario: Scenario,
+  scenario: Pick<Scenario, "track" | "topic">,
   depth: number,
   variant: number,
 ) {
@@ -440,7 +437,7 @@ function problemFor(
   };
 }
 
-function scenarioFor(_r: Roadmap, contract: Contract, variant: number) {
+function scenarioFor(contract: Contract, variant: number) {
   const topic = topicOf(contract.objectiveIds[0] ?? "");
   return (
     SCENARIOS.find((s) => s.track === contract.track && s.topic === topic) ??
@@ -448,9 +445,20 @@ function scenarioFor(_r: Roadmap, contract: Contract, variant: number) {
   );
 }
 
-function seedProbes(g: StudyRecord, contract: Contract, variant: number) {
+/** Knowledge records from an earlier question of the same record, so they
+ * reach the payload as history rather than as the current question's own. */
+function seedProbes(
+  g: StudyRecord,
+  current: Encounter,
+  contract: Contract,
+  variant: number,
+) {
+  const earlier = Object.values(g.encounters)
+    .filter((e) => e.id !== current.id)
+    .at(-1);
+  if (!earlier) throw Error("seedProbes needs a second question in the record");
   const base = {
-    encounter: "f0-room0",
+    encounter: encounterKey(earlier),
     runId: g.id,
     track: contract.track,
     objectiveIds: contract.objectiveIds,
@@ -502,17 +510,17 @@ async function buildGenerate(
     SCENARIOS.find((s) => s.track === track && s.topic === topic) ??
     SCENARIOS[0];
   const depth = track === "PY" ? [1, 2, 3][Math.floor(variant / 2) % 3] : 1;
-  const g = recordFor(20260900 + variant, r);
+  const g = recordFor(r);
   const e = encounterFor(g, 0);
   const contract = contractFor(g, r, scenario, depth, variant);
-  seedProbes(g, contract, variant);
+  seedProbes(g, e, contract, variant);
   let captured: Record<string, unknown> | undefined;
   await withBridge(
     (operation, payload) => {
       if (operation !== "generate") return { text: "unused", complete: false };
       captured = payload;
       const c = payload.contract as Contract;
-      const sc = scenarioFor(r, c, variant);
+      const sc = scenarioFor(c, variant);
       return {
         title: `${sc.title} (D${depth})`,
         prompt: `${sc.prompt}\n\nDepth ${depth}: defend the invariant you use.`,
@@ -594,7 +602,7 @@ async function buildTutor(
       (variant + Math.floor(variant / STAGES.length)) % SCENARIOS.length
     ];
   const depth = scenario.track === "PY" ? 1 + (variant % 2) : 1;
-  const g = recordFor(20261000 + variant, r);
+  const g = recordFor(r);
   const e = encounterFor(g, variant);
   const contract = contractFor(g, r, scenario, depth, variant);
   e.problem = problemFor(scenario, contract, depth);
@@ -636,7 +644,7 @@ async function buildAssess(
   const scenario = SCENARIOS[variant % SCENARIOS.length];
   const kind = EVIDENCE_KINDS[Math.floor(variant / SCENARIOS.length) % 4];
   const depth = scenario.track === "PY" ? 1 + (variant % 2) : 1;
-  const g = recordFor(20261100 + variant, r);
+  const g = recordFor(r);
   const e = encounterFor(g, variant);
   const contract = contractFor(g, r, scenario, depth, variant);
   e.problem = problemFor(scenario, contract, depth);
@@ -750,39 +758,19 @@ export async function buildStudyCases({
 /** Write one case file per operation and merge counts into index.json. */
 async function writeStudyCases(out: string, perOp = 16) {
   const book = await buildStudyCases({ perOp });
-  const target = resolve(out);
-  mkdirSync(target, { recursive: true, mode: 0o700 });
-  chmodSync(target, 0o700);
-  for (const operation of STUDY_OPERATIONS) {
-    const file = join(target, `${operation}.json`);
-    writeFileSync(file, `${JSON.stringify(book[operation], null, 2)}\n`, {
-      mode: 0o600,
-    });
-    chmodSync(file, 0o600);
-  }
-  const indexFile = join(target, "index.json");
-  const prior =
-    existsSync(indexFile) &&
-    (JSON.parse(readFileSync(indexFile, "utf8")) as Record<string, unknown>);
-  const index = {
-    ...(prior && typeof prior === "object" ? prior : {}),
-    ...Object.fromEntries(
+  const { index } = writeCaseFiles(
+    out,
+    Object.fromEntries(
+      STUDY_OPERATIONS.map((operation) => [
+        `${operation}.json`,
+        book[operation],
+      ]),
+    ),
+    Object.fromEntries(
       STUDY_OPERATIONS.map((operation) => [operation, book[operation].length]),
     ),
-  };
-  writeFileSync(indexFile, `${JSON.stringify(index, null, 2)}\n`, {
-    mode: 0o600,
-  });
-  chmodSync(indexFile, 0o600);
+  );
   return { book, index };
-}
-
-function argument(name: string, fallback?: string) {
-  const at = process.argv.indexOf(name);
-  if (at === -1) return fallback;
-  const value = process.argv[at + 1];
-  if (!value) throw Error(`${name} needs a value`);
-  return value;
 }
 
 const entry = process.argv[1] && resolve(process.argv[1]);
@@ -790,9 +778,9 @@ if (entry === fileURLToPath(import.meta.url)) {
   const out = argument("--out", ".local/ai-cases")!;
   const perOp = Number(argument("--per-op", "16"));
   writeStudyCases(out, perOp).then(
-    ({ index }) =>
+    ({ book }) =>
       console.log(
-        `Wrote ${Object.values(index).reduce((n: number, v) => n + Number(v), 0)} study cases to ${resolve(out)}.`,
+        `Wrote ${STUDY_OPERATIONS.reduce((n, op) => n + book[op].length, 0)} study cases to ${resolve(out)}.`,
       ),
     (error) => {
       console.error(error);

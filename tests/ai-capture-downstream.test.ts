@@ -1,4 +1,13 @@
 import assert from "node:assert/strict";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { tutorProblem } from "../src/ai";
 import test from "node:test";
 import { scopeKey } from "../src/learning-model";
@@ -9,6 +18,7 @@ import {
   TUTOR_MESSAGE,
   buildDownstreamCases,
   problemFrom,
+  writeDownstreamCases,
   type GenerateCase,
   type LadderRow,
 } from "../scripts/ai-capture/build-downstream-cases";
@@ -153,6 +163,38 @@ test("rows that are invalid or from another arm are skipped", async () => {
     assert.deepEqual(book.tutor, []);
     assert.deepEqual(book.assess, []);
     assert.deepEqual(book.skipped, [generateCase.id]);
+  }
+});
+
+test("a run that pairs no generate row keeps earlier case files", async () => {
+  const { generateCase, row } = await fixture;
+  const dir = mkdtempSync(join(tmpdir(), "downstream-cases-"));
+  try {
+    const options = {
+      generateCases: [generateCase],
+      setting: SETTING,
+      rep: REP,
+    };
+    await writeDownstreamCases(dir, "results.jsonl", {
+      ...options,
+      rows: [row() as LadderRow],
+    });
+    const tutor = join(dir, "tutor.json");
+    assert.equal(statSync(dir).mode & 0o777, 0o700);
+    assert.equal(statSync(tutor).mode & 0o777, 0o600);
+    assert.equal(existsSync(join(dir, "index.json")), false);
+    const before = readFileSync(tutor, "utf8");
+    assert.equal((JSON.parse(before) as unknown[]).length, 1);
+    await assert.rejects(
+      writeDownstreamCases(dir, "results.jsonl", {
+        ...options,
+        rows: [row({ setting: "opus:high" }) as LadderRow],
+      }),
+      /No valid generate rows in results\.jsonl .* at sonnet:medium rep 3; nothing written/,
+    );
+    assert.equal(readFileSync(tutor, "utf8"), before);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 
