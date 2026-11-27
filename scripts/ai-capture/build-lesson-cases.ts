@@ -19,17 +19,9 @@
  * run that pairs no lesson writes nothing and fails.
  */
 import { createHash } from "node:crypto";
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-// @ts-expect-error Local .mjs module without a declaration shim (as the tests import it).
-import { parseSetting as ladderParseSetting } from "../ai-ladder.mjs";
 import { normalizeLesson } from "../lib/lesson-schema.mjs";
 import type { bridgeRequest } from "../../src/bridge-client";
 import {
@@ -57,6 +49,19 @@ import {
   roadmap,
   scenarioFor,
 } from "./build-study-cases";
+import {
+  argument,
+  lastValidAnswer,
+  parseLadderSetting,
+  readJsonlRows,
+  topicOf,
+  writeCaseFiles,
+  type LadderRow,
+} from "./case-files";
+
+export type { LadderRow };
+/** Reads a ladder results.jsonl strictly; kept under its earlier name. */
+export const parseRows = readJsonlRows;
 
 type LessonOperation = "lesson" | "lesson-chat";
 export type LessonCase = {
@@ -272,8 +277,6 @@ const HASH8 = (value: string) =>
 /** A fixed record id per case, so gap ids and request ids are reproducible. */
 const runIdFor = (index: number) =>
   `run-00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`;
-const topicOf = (id: string | undefined) =>
-  id?.split(":")[1]?.split(".")[0] ?? "";
 
 function withRunId(g: StudyRecord, runId: string) {
   g.id = runId;
@@ -343,15 +346,9 @@ export function lessonFixture(
   index: number,
   spec: LessonSpec = LESSON_SPECS[index],
 ): LessonFixture {
-  const g = withRunId(recordFor(20261120 + index, r), runIdFor(index));
+  const g = withRunId(recordFor(r), runIdFor(index));
   const e = encounterFor(g, 0);
-  const contract = contractFor(
-    g,
-    r,
-    { track: spec.track, topic: spec.topic } as Scenario,
-    spec.depth,
-    index,
-  );
+  const contract = contractFor(g, r, spec, spec.depth, index);
   if (
     contract.track !== spec.track ||
     topicOf(contract.objectiveIds[0]) !== spec.topic
@@ -359,7 +356,7 @@ export function lessonFixture(
     throw Error(
       `Scheduler chose ${contract.objectiveIds[0]} for ${spec.track} ${spec.topic}`,
     );
-  const scenario = scenarioFor(r, contract, index);
+  const scenario = scenarioFor(contract, index);
   e.problem = diagnosticProblem(g, r, contract, scenario, spec, index);
   if (spec.scope) {
     if (!e.problem.scopeDefinitions?.length)
@@ -1142,22 +1139,6 @@ export async function buildLessonCases({
   return { lesson, "lesson-chat": chat };
 }
 
-/** The ladder's own `<model>:<effort>` grammar, typed for this builder. */
-const parseSetting = ladderParseSetting as (value: string) => {
-  model: string;
-  effort: string;
-  setting: string;
-};
-
-export type LadderRow = {
-  caseId: string;
-  operation: string;
-  setting: string;
-  rep: number;
-  outcome: string;
-  answers?: unknown[];
-};
-
 /** The lesson of the first valid `lesson` row for this case, arm and rep. */
 function armLesson(
   rows: LadderRow[],
@@ -1165,18 +1146,12 @@ function armLesson(
   setting: string,
   rep: number,
 ) {
-  const row = rows.find(
-    (candidate) =>
-      candidate.caseId === caseId &&
-      candidate.operation === "lesson" &&
-      candidate.setting === setting &&
-      candidate.rep === rep &&
-      candidate.outcome === "valid" &&
-      Array.isArray(candidate.answers) &&
-      candidate.answers.length > 0,
-  );
-  const answer = row?.answers![row.answers!.length - 1] as
-    { gapId?: unknown; lesson?: unknown } | undefined;
+  const answer = lastValidAnswer(rows, {
+    caseId,
+    operation: "lesson",
+    setting,
+    rep,
+  }) as { gapId?: unknown; lesson?: unknown } | undefined;
   return answer && typeof answer === "object" ? answer : undefined;
 }
 
@@ -1228,60 +1203,22 @@ export async function buildChatFromLessons({
   return { chat, skipped };
 }
 
-export function parseRows(file: string): LadderRow[] {
-  const rows: LadderRow[] = [];
-  for (const [index, line] of readFileSync(resolve(file), "utf8")
-    .split("\n")
-    .entries()) {
-    if (!line.trim()) continue;
-    try {
-      rows.push(JSON.parse(line) as LadderRow);
-    } catch {
-      throw Error(`${file}:${index + 1} is not valid JSONL`);
-    }
-  }
-  return rows;
-}
-
 /** Write one case file per operation (0600) in a private (0700) directory
  * and merge their counts into index.json, as build-study-cases.ts does. */
 export function writeLessonCases(
   out: string,
   book: Partial<Record<LessonOperation, LessonCase[]>>,
 ) {
-  const target = resolve(out);
-  mkdirSync(target, { recursive: true, mode: 0o700 });
-  chmodSync(target, 0o700);
+  const files: Record<string, LessonCase[]> = {};
   const written: Record<string, number> = {};
   for (const operation of LESSON_OPERATIONS) {
     const cases = book[operation];
     if (!cases) continue;
-    const file = join(target, `${operation}.json`);
-    writeFileSync(file, `${JSON.stringify(cases, null, 2)}\n`, { mode: 0o600 });
-    chmodSync(file, 0o600);
+    files[`${operation}.json`] = cases;
     written[operation] = cases.length;
   }
-  const indexFile = join(target, "index.json");
-  const prior =
-    existsSync(indexFile) &&
-    (JSON.parse(readFileSync(indexFile, "utf8")) as Record<string, unknown>);
-  const index = {
-    ...(prior && typeof prior === "object" ? prior : {}),
-    ...written,
-  };
-  writeFileSync(indexFile, `${JSON.stringify(index, null, 2)}\n`, {
-    mode: 0o600,
-  });
-  chmodSync(indexFile, 0o600);
+  const { target, index } = writeCaseFiles(out, files, written);
   return { target, written, index };
-}
-
-function argument(name: string, fallback?: string) {
-  const at = process.argv.indexOf(name);
-  if (at === -1) return fallback;
-  const value = process.argv[at + 1];
-  if (!value) throw Error(`${name} needs a value`);
-  return value;
 }
 
 /**
@@ -1304,7 +1241,7 @@ export async function writeChatFromRun({
 }) {
   if (!out) throw Error("--lessons-from needs an explicit --out <dir>");
   if (!setting) throw Error("--lessons-from needs --setting <model:effort>");
-  const parsed = parseSetting(setting).setting;
+  const parsed = parseLadderSetting(setting).setting;
   if (!Number.isInteger(rep) || rep < 0)
     throw Error("--rep must be an integer");
   const results = join(resolve(from), "results.jsonl");

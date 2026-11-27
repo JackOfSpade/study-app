@@ -5,6 +5,9 @@ import { join } from "node:path";
 import test from "node:test";
 import {
   cheapestFirst,
+  latestRows,
+  parseArgs,
+  parseList,
   parseSetting,
   readCases,
   readLadderRows,
@@ -53,6 +56,11 @@ function scriptedFactory({ fail = () => null } = {}) {
           options.usageLog({ ...base, costUsd: null, outcome: "usage-limit" });
           const error = Error("limit reached");
           error.code = "CLAUDE_USAGE_LIMIT";
+          throw error;
+        }
+        if (scripted === "not-signed-in") {
+          const error = Error("not signed in");
+          error.code = "CLAUDE_NOT_SIGNED_IN";
           throw error;
         }
         options.usageLog(base);
@@ -217,6 +225,96 @@ test("a usage limit stops the whole run after writing its row", async () => {
   );
 });
 
+test("a usage-limit arm is retried on resume and only its newer row counts", async () => {
+  const out = join(store(), "run");
+  const limited = scriptedFactory({
+    fail: (_operation, payload) => (payload.limit ? "usage-limit" : null),
+  });
+  const limitCases = [
+    { id: "limit", operation: "review-environment", payload: { limit: true } },
+    { id: "later", operation: "review-environment", payload: {} },
+  ];
+  await runLadder({
+    cases: limitCases,
+    settings: ["haiku:low"],
+    out,
+    ephemeral: true,
+    parallel: 1,
+    runId: "run-1",
+    gatewayFactory: limited.factory,
+    log: () => {},
+  });
+  assert.deepEqual(
+    readLadderRows(out).map((row) => [row.caseId, row.outcome]),
+    [["limit", "usage-limit"]],
+  );
+  assert.deepEqual(summarizeLadder(readLadderRows(out)), []);
+  const healthy = scriptedFactory();
+  const second = await runLadder({
+    cases: limitCases,
+    settings: ["haiku:low"],
+    out,
+    ephemeral: true,
+    parallel: 1,
+    runId: "run-2",
+    gatewayFactory: healthy.factory,
+  });
+  assert.deepEqual(
+    second.rows.map((row) => [row.caseId, row.outcome]),
+    [
+      ["limit", "valid"],
+      ["later", "valid"],
+    ],
+  );
+  const rows = readLadderRows(out);
+  assert.equal(rows.length, 3);
+  assert.deepEqual(
+    latestRows(rows).map((row) => [row.caseId, row.runId]),
+    [
+      ["limit", "run-2"],
+      ["later", "run-2"],
+    ],
+  );
+  const [summary] = summarizeLadder(rows);
+  assert.equal(summary.n, 2);
+  assert.equal(summary.validRate, 1);
+});
+
+test("a signed-out CLI stops the run instead of failing every arm", async () => {
+  const { factory, arms } = scriptedFactory({ fail: () => "not-signed-in" });
+  const out = join(store(), "run");
+  const messages = [];
+  await runLadder({
+    cases,
+    settings: ["haiku:low", "sonnet:high"],
+    out,
+    ephemeral: true,
+    parallel: 1,
+    runId: "run-s",
+    gatewayFactory: factory,
+    log: (message) => messages.push(message),
+  });
+  assert.equal(arms.length, 1);
+  assert.deepEqual(
+    readLadderRows(out).map((row) => row.outcome),
+    ["not-signed-in"],
+  );
+  assert.equal(messages.length, 1);
+  assert.match(messages[0], /^The Claude CLI is not signed in on a /);
+});
+
+test("flags keep every '=' after the first, and lists are trimmed", () => {
+  assert.deepEqual(parseArgs(["--out=/runs/a=b", "--json", "--name", "x"]), {
+    _: [],
+    out: "/runs/a=b",
+    json: true,
+    name: "x",
+  });
+  assert.deepEqual(parseList("tutor, assess,,"), ["tutor", "assess"]);
+  assert.deepEqual(parseList([" generate ", ""]), ["generate"]);
+  assert.deepEqual(parseList(undefined), []);
+});
+
 test("a temporary output directory is refused unless the run is ephemeral", async () => {
   const target = join(tmpdir(), `ai-ladder-refuse-${process.pid}`);
   assert.match(unsafeOutReason(target), /temporary directory/);
@@ -247,8 +345,10 @@ test("a temporary output directory is refused unless the run is ephemeral", asyn
 test("the summary reports exact reliability, cost and speed figures", () => {
   const rows = [
     {
+      caseId: "a",
       operation: "tutor",
       setting: "haiku:low",
+      rep: 0,
       outcome: "valid",
       corrections: 0,
       costUsd: 0.2,
@@ -256,8 +356,10 @@ test("the summary reports exact reliability, cost and speed figures", () => {
       firstTextMs: 10,
     },
     {
+      caseId: "b",
       operation: "tutor",
       setting: "haiku:low",
+      rep: 0,
       outcome: "invalid",
       corrections: 1,
       costUsd: 0.6,
@@ -265,8 +367,10 @@ test("the summary reports exact reliability, cost and speed figures", () => {
       firstTextMs: 30,
     },
     {
+      caseId: "a",
       operation: "tutor",
       setting: "opus:xhigh",
+      rep: 0,
       outcome: "valid",
       corrections: 0,
       costUsd: 2,

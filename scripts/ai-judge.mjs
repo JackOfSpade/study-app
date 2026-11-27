@@ -8,27 +8,38 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
+  HOST_FAILURES,
   defaultOut,
+  latestRows,
   parseArgs,
+  parseList,
   parseSetting,
   readCases,
   readLadderRows,
+  rowKey,
 } from "./ai-ladder.mjs";
 import { claudeChildEnv, resolveClaudeBinary } from "./claude-gateway.mjs";
 import { taskInstructions } from "./lib/ai-contracts.mjs";
+import { isNumber, mean } from "./lib/measure.mjs";
 
 export const JUDGE_SYSTEM =
   "You are a strict, impartial evaluator of AI outputs for a study workspace. Judge only against the task instructions. Ignore length and style unless the instructions require them. Reply with one JSON object only.";
 
-const isNumber = (value) => typeof value === "number" && Number.isFinite(value);
-const mean = (values) => {
-  const known = values.filter(isNumber);
-  return known.length
-    ? known.reduce((total, value) => total + value, 0) / known.length
-    : null;
-};
-const judgmentKey = (row) =>
-  `${row.caseId}\u0000${row.setting}\u0000${row.rep}`;
+const MAX_EFFORT_REFUSAL =
+  'Judge effort "max" is never allowed; the highest is xhigh (docs/AI_MODEL_SELECTION.md, Hard exclusions)';
+
+/** A judgment shares its ladder row's key. */
+const judgmentKey = rowKey;
+
+/** An `invalid` judgment written for a host-failure row before such rows
+ * were left out: it says nothing about the setting and must not block the
+ * retried arm. */
+const hostFailureJudgment = (judgment) =>
+  judgment?.verdict === "invalid" &&
+  [...HOST_FAILURES].some(
+    (outcome) => judgment.reason === `candidate outcome ${outcome}`,
+  );
+
 const lastAnswer = (row) =>
   Array.isArray(row?.answers) && row.answers.length
     ? row.answers[row.answers.length - 1]
@@ -203,14 +214,15 @@ export function readJudgments(out) {
     });
 }
 
-/** The reference arm: the setting a ladder ran twice, its first run. */
+/** The reference arm: the setting a ladder ran twice, its first run. Reps are
+ * numbered from 0, so an explicit reference without a rep means rep 0. */
 export function resolveReference(rows, reference) {
   const list = Array.isArray(rows) ? rows : [];
   if (reference && typeof reference.setting === "string" && reference.setting) {
-    const rep = Number.isInteger(reference.rep) ? reference.rep : 1;
+    const rep = Number.isInteger(reference.rep) ? reference.rep : 0;
     return { setting: reference.setting, rep };
   }
-  const repeated = list.filter((row) => row.rep === 2);
+  const repeated = list.filter((row) => row.rep === 1);
   const pool = repeated.length ? repeated : list;
   const counts = new Map();
   for (const row of pool)
@@ -219,11 +231,11 @@ export function resolveReference(rows, reference) {
     [...counts.entries()].sort(
       (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]),
     )[0]?.[0] ?? null;
-  if (!setting) return { setting: null, rep: 1 };
+  if (!setting) return { setting: null, rep: 0 };
   const reps = list
     .filter((row) => row.setting === setting)
     .map((row) => row.rep);
-  return { setting, rep: reps.includes(1) ? 1 : Math.min(...reps) };
+  return { setting, rep: reps.includes(0) ? 0 : Math.min(...reps) };
 }
 
 // DeepSeek reasoning tokens count toward this cap, so leave room beyond the reply.
@@ -243,22 +255,28 @@ export function createOffloadCompleter({
       });
       let stdout = "";
       let stderr = "";
+      let settled = false;
+      const finish = (error, value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (error) reject(error);
+        else resolve(value);
+      };
       const timer = setTimeout(() => {
         child.kill("SIGKILL");
-        reject(Error(`offload timed out after ${timeoutMs}ms`));
+        finish(Error(`offload timed out after ${timeoutMs}ms`));
       }, timeoutMs);
       child.stdout.setEncoding("utf8");
       child.stderr.setEncoding("utf8");
       child.stdout.on("data", (chunk) => (stdout += chunk));
       child.stderr.on("data", (chunk) => (stderr += chunk));
-      child.on("error", (error) => {
-        clearTimeout(timer);
-        reject(Error(`could not spawn ${bin}: ${error.message}`));
-      });
+      child.on("error", (error) =>
+        finish(Error(`could not spawn ${bin}: ${error.message}`)),
+      );
       child.on("close", (code) => {
-        clearTimeout(timer);
         if (code !== 0) {
-          reject(
+          finish(
             Error(`${bin} exited ${code}: ${(stderr || stdout).slice(0, 400)}`),
           );
           return;
@@ -268,7 +286,7 @@ export function createOffloadCompleter({
           .map((part) => part.trim())
           .find((part) => part.startsWith("{"));
         if (!line) {
-          reject(
+          finish(
             Error(`offload printed no JSON reply: ${stdout.slice(0, 400)}`),
           );
           return;
@@ -277,11 +295,11 @@ export function createOffloadCompleter({
         try {
           reply = JSON.parse(line);
         } catch (error) {
-          reject(Error(`offload printed invalid JSON: ${error.message}`));
+          finish(Error(`offload printed invalid JSON: ${error.message}`));
           return;
         }
         if (!reply?.ok) {
-          reject(
+          finish(
             Error(
               `offload failed: ${reply?.error?.code ?? "unknown"} ${
                 reply?.error?.message ?? ""
@@ -292,14 +310,17 @@ export function createOffloadCompleter({
         }
         const text = String(reply.text ?? "").trim();
         if (!text) {
-          reject(Error("offload returned an empty reply"));
+          finish(Error("offload returned an empty reply"));
           return;
         }
-        resolve({
+        finish(undefined, {
           text,
           costUsd: isNumber(reply.costUsd) ? reply.costUsd : null,
         });
       });
+      // A child that is missing or exits before reading a large payload makes
+      // this write fail (EPIPE); the spawn error or exit code reports it.
+      child.stdin.on("error", () => {});
       child.stdin.end(`${JSON.stringify(request)}\n`);
     });
   completer.judge = "offload:deepseek-flash";
@@ -334,21 +355,16 @@ export function claudeJudgeArgs({ model, effort, system }) {
 
 /** Only the ladder's aliases and efforts: never `max`, never a pinned id. */
 export function parseJudgeSetting(model = "opus", effort = "high") {
-  if (String(effort).trim() === "max")
-    throw Error(
-      'Judge effort "max" is never allowed; the highest is xhigh (docs/AI_MODEL_SELECTION.md, Hard exclusions)',
-    );
-  return parseSetting(`${model}:${effort}`);
+  return parseJudgeSettingArg(
+    `${String(model).trim()}:${String(effort).trim()}`,
+  );
 }
 
 /** The `--judge-setting` value as one strict `<model>:<effort>` string: a
  * missing effort or extra parts fail instead of falling back to a default. */
 export function parseJudgeSettingArg(value = "opus:high") {
   const text = String(value ?? "").trim();
-  if (/:max$/.test(text))
-    throw Error(
-      'Judge effort "max" is never allowed; the highest is xhigh (docs/AI_MODEL_SELECTION.md, Hard exclusions)',
-    );
+  if (/:max$/.test(text)) throw Error(MAX_EFFORT_REFUSAL);
   return parseSetting(text);
 }
 
@@ -539,7 +555,8 @@ const replyText = (reply) =>
 const replyCost = (reply) =>
   typeof reply === "object" && isNumber(reply?.costUsd) ? reply.costUsd : null;
 
-/** Asks once, retries one malformed reply, then gives up with null. */
+/** Asks once, retries once after a malformed reply or a failed call, then
+ * gives up with null. */
 async function askJudge(completer, messages) {
   let cost = null;
   let text = "";
@@ -576,7 +593,10 @@ const instructionsOf = (entry, operation, payload) => {
   }
 };
 
-/** Judges every non-reference valid row against the reference row, blindly. */
+/** Judges every non-reference row against its usable reference row, blindly.
+ * Rows are the newest per arm with host failures left out, and a row whose
+ * reference row is missing, failed or empty is counted in `noReference`
+ * instead of being compared with nothing. */
 export async function judgeLadder({
   out,
   cases,
@@ -590,7 +610,7 @@ export async function judgeLadder({
     throw Error("An output directory is required");
   // `only` limits judging to some operations, so each can use its own reference.
   const wanted = only?.length ? new Set(only) : undefined;
-  const rows = readLadderRows(out).filter(
+  const rows = latestRows(readLadderRows(out)).filter(
     (row) => !wanted || wanted.has(row.operation),
   );
   const judgmentsFile = join(out, "judgments.jsonl");
@@ -606,15 +626,25 @@ export async function judgeLadder({
   // done: a later run retries it and the newer row supersedes it.
   const done = new Set(
     latestJudgments(readJudgments(out))
-      .filter((judgment) => judgment.verdict !== "judge-error")
+      .filter(
+        (judgment) =>
+          judgment.verdict !== "judge-error" && !hostFailureJudgment(judgment),
+      )
       .map(judgmentKey),
   );
   const jobs = [];
   let skipped = 0;
+  let noReference = 0;
   for (const row of rows) {
     if (row.setting === resolved.setting && row.rep === resolved.rep) continue;
     const referenceRow = referenceRows.get(row.caseId);
-    if (!referenceRow) continue;
+    if (
+      referenceRow?.outcome !== "valid" ||
+      lastAnswer(referenceRow) === null
+    ) {
+      noReference++;
+      continue;
+    }
     if (done.has(judgmentKey(row))) {
       skipped++;
       continue;
@@ -707,24 +737,31 @@ export async function judgeLadder({
     judge,
     judgments,
     skipped,
-    pending: jobs.length,
+    noReference,
+    attempted: jobs.length,
   };
 }
 
-const noiseFloorEntry = (summary, reference) => {
-  const lines = summary.filter((entry) => entry.setting === reference.setting);
+/** One operation's noise-floor line: the reference setting's next rep. */
+const noiseFloorEntry = (operationLines, reference) => {
+  const lines = operationLines.filter(
+    (entry) => entry.setting === reference.setting,
+  );
   if (!lines.length) return null;
-  const repeated = lines.find((entry) => entry.rep === 2);
+  const repeated = lines.find((entry) => entry.rep === reference.rep + 1);
   if (repeated) return repeated;
   const others = lines.filter((entry) => entry.rep !== reference.rep);
   if (others.length) return others.sort((a, b) => b.rep - a.rep)[0];
   return lines[0];
 };
 
-/** Per operation × setting × rep quality, agreement, validity and cost. */
+/** Per operation × setting × rep quality, agreement, validity and cost, over
+ * the newest row and judgment per arm (host failures left out). */
 export function summarizeJudgments(judgments, rows, { reference } = {}) {
-  const rowList = Array.isArray(rows) ? rows : [];
-  const list = latestJudgments(judgments);
+  const rowList = latestRows(rows);
+  const list = latestJudgments(judgments).filter(
+    (judgment) => !hostFailureJudgment(judgment),
+  );
   const resolved = resolveReference(rowList, reference);
   const referenceMeans = new Map();
   for (const judgment of list) {
@@ -778,8 +815,13 @@ export function summarizeJudgments(judgments, rows, { reference } = {}) {
       noiseFloor: false,
     };
   });
-  const floor = noiseFloorEntry(summary, resolved);
-  if (floor) floor.noiseFloor = true;
+  for (const operation of new Set(summary.map((entry) => entry.operation))) {
+    const floor = noiseFloorEntry(
+      summary.filter((entry) => entry.operation === operation),
+      resolved,
+    );
+    if (floor) floor.noiseFloor = true;
+  }
   return summary.sort(
     (a, b) =>
       a.operation.localeCompare(b.operation) ||
@@ -940,14 +982,12 @@ async function main(argv) {
     );
   if (!args.name && !args.out) throw Error("Pass --name <name> or --out <dir>");
   const out = args.out ?? defaultOut(args.name);
+  const referenceRep =
+    args["reference-rep"] === undefined ? 0 : Number(args["reference-rep"]);
+  if (!Number.isInteger(referenceRep) || referenceRep < 0)
+    throw Error("--reference-rep must be a non-negative integer");
   const reference = args.reference
-    ? {
-        setting: args.reference,
-        rep:
-          args["reference-rep"] === undefined
-            ? 1
-            : Number(args["reference-rep"]),
-      }
+    ? { setting: args.reference, rep: referenceRep }
     : undefined;
   if (command === "run") {
     const backend = args.judge ?? "offload";
@@ -968,13 +1008,15 @@ async function main(argv) {
       reference,
       completer,
       parallel: args.parallel === undefined ? 4 : Number(args.parallel),
-      only: args.only ? String(args.only).split(",") : undefined,
+      only: parseList(args.only),
     });
     console.log(
-      `${result.judgments.length} new judgment(s) by ${result.judge} in ${result.judgmentsFile} (reference ${result.reference.setting} rep ${result.reference.rep}); ${result.skipped} already judged`,
+      `${result.judgments.length} new judgment(s) by ${result.judge} in ${result.judgmentsFile} (reference ${result.reference.setting} rep ${result.reference.rep}); ${result.skipped} already judged; ${result.noReference} without a usable reference row`,
     );
   }
-  const judgments = latestJudgments(readJudgments(out));
+  const judgments = latestJudgments(readJudgments(out)).filter(
+    (judgment) => !hostFailureJudgment(judgment),
+  );
   const summary = summarizeJudgments(judgments, readLadderRows(out), {
     reference,
   });
@@ -1003,6 +1045,6 @@ async function main(argv) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
   main(process.argv.slice(2)).catch((error) => {
-    console.error(error.message);
-    process.exit(1);
+    console.error(error?.message ?? error);
+    process.exitCode = 1;
   });

@@ -14,6 +14,7 @@ import {
   JUDGE_SYSTEM,
   candidateFirst,
   createClaudeCompleter,
+  createOffloadCompleter,
   fieldAgreement,
   judgeLadder,
   judgeMessages,
@@ -27,6 +28,7 @@ import {
   readJudgments,
   summarizeJudgments,
 } from "../scripts/ai-judge.mjs";
+import { readLadderRows } from "../scripts/ai-ladder.mjs";
 
 const realpathOf = (path) => realpathSync(path);
 const tempOut = () => mkdtempSync(join(tmpdir(), "ai-judge-test-"));
@@ -545,6 +547,158 @@ test("summarizeJudgments reports deltas, verdicts, agreement, validity and cost"
   assert.equal(floor.noiseFloor, true);
 });
 
+test("every operation gets its own noise-floor line and knee input", () => {
+  const rows = ["generate", "tutor"].flatMap((operation) => {
+    const caseId = `${operation}-1`;
+    return ["cheap", "mid", "dear"]
+      .map((setting) => ladderRow({ caseId, operation, setting }))
+      .concat(
+        ladderRow({ caseId, operation, setting: "ref", rep: 0 }),
+        ladderRow({ caseId, operation, setting: "ref", rep: 1 }),
+      );
+  });
+  const judgments = rows
+    .filter((row) => !(row.setting === "ref" && row.rep === 0))
+    .map((row) =>
+      judgmentRow({
+        caseId: row.caseId,
+        operation: row.operation,
+        setting: row.setting,
+        rep: row.rep,
+        delta: row.setting === "ref" ? 0.5 : 0,
+      }),
+    );
+  const summary = summarizeJudgments(judgments, rows);
+  assert.deepEqual(
+    summary
+      .filter((entry) => entry.noiseFloor)
+      .map((entry) => `${entry.operation}|${entry.setting}|${entry.rep}`),
+    ["generate|ref|1", "tutor|ref|1"],
+  );
+  for (const report of kneeReport(summary))
+    assert.equal(report.noiseFloorDelta, 0.5, report.operation);
+});
+
+test("an explicit reference without a rep means rep 0", async (t) => {
+  const out = tempOut();
+  t.after(() => rmSync(out, { recursive: true, force: true }));
+  writeRows(out, [
+    ladderRow({ setting: "sonnet:high", rep: 0 }),
+    ladderRow({ setting: "haiku:low", rep: 0 }),
+  ]);
+  const result = await judgeLadder({
+    out,
+    cases: CASES,
+    reference: { setting: "sonnet:high" },
+    completer: fakeCompleter({
+      text: '{"scoreA": 5, "scoreB": 5, "better": "tie", "reason": "same"}',
+    }),
+  });
+  assert.deepEqual(result.reference, { setting: "sonnet:high", rep: 0 });
+  assert.equal(result.judgments.length, 1);
+  assert.equal(result.attempted, 1);
+});
+
+test("without a reference, the setting run twice is chosen at rep 0", async (t) => {
+  const out = tempOut();
+  t.after(() => rmSync(out, { recursive: true, force: true }));
+  writeRows(out, [
+    ladderRow({ setting: "haiku:low", rep: 0 }),
+    ladderRow({ setting: "sonnet:high", rep: 0 }),
+    ladderRow({ setting: "sonnet:high", rep: 1 }),
+  ]);
+  const result = await judgeLadder({
+    out,
+    cases: CASES,
+    completer: fakeCompleter({
+      text: '{"scoreA": 5, "scoreB": 5, "better": "tie", "reason": "same"}',
+    }),
+  });
+  assert.deepEqual(result.reference, { setting: "sonnet:high", rep: 0 });
+  assert.deepEqual(
+    result.judgments.map((entry) => `${entry.setting}|${entry.rep}`).sort(),
+    ["haiku:low|0", "sonnet:high|1"],
+  );
+});
+
+test("a row whose reference row failed is not judged", async (t) => {
+  const out = tempOut();
+  t.after(() => rmSync(out, { recursive: true, force: true }));
+  writeRows(out, [
+    ladderRow({
+      setting: "sonnet:high",
+      rep: 0,
+      outcome: "invalid",
+      answers: [],
+    }),
+    ladderRow({ setting: "haiku:low", rep: 0 }),
+  ]);
+  const completer = fakeCompleter({
+    text: '{"scoreA": 9, "scoreB": 1, "better": "A", "reason": "x"}',
+  });
+  const result = await judgeLadder({
+    out,
+    cases: CASES,
+    reference: { setting: "sonnet:high", rep: 0 },
+    completer,
+  });
+  assert.equal(completer.calls.length, 0);
+  assert.equal(result.judgments.length, 0);
+  assert.equal(result.noReference, 1);
+  assert.equal(readJudgments(out).length, 0);
+});
+
+test("host-failure rows are never judged and a retried arm replaces them", async (t) => {
+  const out = tempOut();
+  t.after(() => rmSync(out, { recursive: true, force: true }));
+  const reference = { setting: "sonnet:high", rep: 0 };
+  writeRows(out, [
+    ladderRow({ setting: "sonnet:high", rep: 0 }),
+    ladderRow({ setting: "haiku:low", outcome: "usage-limit", answers: [] }),
+  ]);
+  // A judgment written for the host-failure row by an earlier build.
+  writeFileSync(
+    join(out, "judgments.jsonl"),
+    `${JSON.stringify(
+      judgmentRow({
+        setting: "haiku:low",
+        verdict: "invalid",
+        candidateScore: 0,
+        referenceScore: null,
+        delta: null,
+        reason: "candidate outcome usage-limit",
+      }),
+    )}\n`,
+  );
+  const completer = fakeCompleter({
+    text: '{"scoreA": 5, "scoreB": 5, "better": "tie", "reason": "same"}',
+  });
+  const first = await judgeLadder({ out, cases: CASES, reference, completer });
+  assert.equal(first.judgments.length, 0);
+  assert.deepEqual(
+    summarizeJudgments(readJudgments(out), readLadderRows(out), {
+      reference,
+    }).map((entry) => `${entry.setting}|${entry.n}`),
+    ["sonnet:high|0"],
+  );
+  writeFileSync(
+    join(out, "results.jsonl"),
+    `${readFileSync(join(out, "results.jsonl"), "utf8")}${JSON.stringify(
+      ladderRow({ setting: "haiku:low" }),
+    )}\n`,
+  );
+  const second = await judgeLadder({ out, cases: CASES, reference, completer });
+  assert.equal(second.judgments.length, 1);
+  assert.equal(second.judgments[0].verdict, "tie");
+  const summary = summarizeJudgments(readJudgments(out), readLadderRows(out), {
+    reference,
+  });
+  const haiku = summary.find((entry) => entry.setting === "haiku:low");
+  assert.equal(haiku.n, 1);
+  assert.equal(haiku.ties, 1);
+  assert.equal(haiku.validRate, 1);
+});
+
 const kneeSummary = [
   {
     operation: "generate",
@@ -798,6 +952,23 @@ test("the Claude judge reports CLI failures clearly", async (t) => {
   await assert.rejects(
     run({ mode: "sleep" }, { timeoutMs: 300 }),
     /timed out after 300ms/,
+  );
+});
+
+test("the offload judge rejects, never crashes, when its child cannot read the payload", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "ai-judge-offload-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const bin = join(dir, "offload-stub");
+  writeFileSync(bin, "#!/bin/sh\necho gone >&2\nexit 4\n");
+  chmodSync(bin, 0o755);
+  const request = { messages: [{ role: "user", content: "x".repeat(500000) }] };
+  await assert.rejects(
+    createOffloadCompleter({ bin })(request),
+    /exited 4: gone/,
+  );
+  await assert.rejects(
+    createOffloadCompleter({ bin: join(dir, "missing") })(request),
+    /could not spawn/,
   );
 });
 
