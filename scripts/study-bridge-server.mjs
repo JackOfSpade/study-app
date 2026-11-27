@@ -5,6 +5,14 @@ import { AI_OPERATIONS } from "./lib/ai-contracts.mjs";
 import { isRecord } from "./lib/is-record.mjs";
 
 /** Construct the actual loopback relay without launching Vite, for isolated transport verification. */
+// "connected", "gateway-off", or the gateway's own reason (for example
+// "cli-missing" or "signed-out").
+export async function claudeConnection(claude) {
+  return !claude?.enabled()
+    ? "gateway-off"
+    : ((await claude.connection?.()) ?? "connected");
+}
+
 export function createStudyBridgeServer({ claude, control, reports } = {}) {
   return createServer(async (req, res) => {
     res.setHeader("Content-Type", "application/json");
@@ -28,9 +36,7 @@ export function createStudyBridgeServer({ claude, control, reports } = {}) {
         return;
       }
       if (req.url === "/api/status" && req.method === "GET") {
-        const connection = !claude?.enabled()
-          ? "gateway-off"
-          : ((await claude.connection?.()) ?? "connected");
+        const connection = await claudeConnection(claude);
         if (connection === "connected") {
           res.end(
             JSON.stringify({
@@ -67,6 +73,8 @@ export function createStudyBridgeServer({ claude, control, reports } = {}) {
         const parsed = await readJsonBody(req);
         if (!isRecord(parsed) || !AI_OPERATIONS.includes(parsed.operation))
           throw new HttpInputError(400, "Unknown operation");
+        if (!isRecord(parsed.payload))
+          throw new HttpInputError(400, "Invalid payload");
         // A saved request belongs to the provider that captured it.
         if (
           [parsed.provider, parsed.payload?.provider].some(
@@ -109,14 +117,21 @@ export function createStudyBridgeServer({ claude, control, reports } = {}) {
             res.end();
           } else res.end(JSON.stringify(answer));
         } catch (error) {
+          // An uncoded failure is an internal bug: log it here and send a
+          // fixed message, as the fallback handler below does.
+          const coded = error.code !== undefined;
+          if (!coded) console.error("Study bridge request failed:", error);
           if (res.destroyed) return;
+          const reply = coded
+            ? { error: error.message, code: error.code }
+            : { error: "Study bridge request failed" };
           if (streaming) {
-            line({ error: error.message, code: error.code });
+            line(reply);
             res.end();
             return;
           }
-          res.writeHead(error.status ?? 502);
-          res.end(JSON.stringify({ error: error.message, code: error.code }));
+          res.writeHead(coded ? (error.status ?? 502) : 502);
+          res.end(JSON.stringify(reply));
         }
         return;
       }

@@ -20,7 +20,7 @@ const ids = (value) =>
   value.every((id) => typeof id === "string" && id && id.length <= 200);
 
 /** `help` absent, or {nudges,hints,gives,offers}, each a list of facet ids. */
-export const validHelp = (help) =>
+const validHelp = (help) =>
   help === undefined ||
   (object(help) && FIELDS.every((field) => ids(help[field])));
 

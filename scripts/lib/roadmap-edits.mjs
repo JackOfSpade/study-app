@@ -9,7 +9,7 @@
 
 import { isRecord } from "./is-record.mjs";
 
-export const ROADMAP_EDIT_LIMITS = Object.freeze({
+const ROADMAP_EDIT_LIMITS = Object.freeze({
   maxEdits: 1000,
   maxFindLength: 20_000,
   maxReplaceLength: 200_000,
@@ -20,13 +20,6 @@ export const KEEP_LOCAL = "keep-local";
 
 export const ROADMAP_EDIT_GUIDANCE =
   "Describe the proposed file as edits, never as the whole file: edits is an ordered array of {find,replace} applied to payload.local. Each find is exact text that occurs exactly once in the document as it stands after the previous edits (include enough neighbouring text to make it unique); replace is the exact new text, or an empty string to delete. To add rows, find the row they follow and replace it with itself plus the new rows. Copy incoming rows exactly. Every part of local you do not edit is kept byte for byte, so update header fields such as revision and parent_file_sha256 with edits too. If the incoming file should not be adopted at all, return outcome:'keep-local' with rationale and decisions and no edits; that keeps the local roadmap unchanged and is a complete answer, not a failure.";
-
-const occurrences = (text, find) => {
-  let count = 0;
-  for (let at = text.indexOf(find); at !== -1; at = text.indexOf(find, at + 1))
-    if (++count > 1) break;
-  return count;
-};
 
 /** Apply ordered exact-match edits; throws naming the first edit that fails. */
 export function applyRoadmapEdits(local, edits) {
@@ -55,14 +48,13 @@ export function applyRoadmapEdits(local, edits) {
       throw Error(
         `${label}.replace is longer than ${ROADMAP_EDIT_LIMITS.maxReplaceLength} characters`,
       );
-    const count = occurrences(text, find);
-    if (count === 0)
+    const at = text.indexOf(find);
+    if (at === -1)
       throw Error(`${label}.find does not occur in the document at that point`);
-    if (count > 1)
+    if (text.indexOf(find, at + 1) !== -1)
       throw Error(
         `${label}.find occurs more than once; include more neighbouring text`,
       );
-    const at = text.indexOf(find);
     text = text.slice(0, at) + replace + text.slice(at + find.length);
   });
   if (text === local)

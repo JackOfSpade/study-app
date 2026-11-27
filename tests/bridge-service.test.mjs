@@ -8,6 +8,7 @@ import {
   realpathSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
   utimesSync,
 } from "node:fs";
@@ -33,7 +34,7 @@ async function fixture() {
   const entry = join(root, "relay.mjs");
   writeFileSync(
     entry,
-    `import {bootstrapBridge} from ${JSON.stringify(serverModule)};bootstrapBridge({handoffDirectory:${JSON.stringify(join(root, "handoff"))},publicDirectory:${JSON.stringify(join(root, "public"))},publicConfig:{hostname:'synthetic-life.lullascape.com',connectorRanges:['203.0.113.0/24']}});`,
+    `import {bootstrapBridge} from ${JSON.stringify(serverModule)};bootstrapBridge();`,
   );
   const options = { root, port, entry, directory: join(root, "runtime") };
   const api = async (path, body, headers = {}) => {
@@ -82,10 +83,10 @@ async function launcher(options) {
   return JSON.parse(output.trim());
 }
 
-test("a relay that needs over ten seconds to load its queue still starts", async () => {
+test("a relay that needs over ten seconds to start still starts", async () => {
   const f = await fixture();
   try {
-    // A synchronous delay matches a large queue being validated at startup.
+    // A synchronous delay stands in for a slow machine at startup.
     writeFileSync(
       f.options.entry,
       `Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,10500);\n` +
@@ -407,6 +408,21 @@ test("the actual dev-launcher shutdown stops its app child and leaves the bridge
     await stop();
   } finally {
     await stop();
+    await f.close();
+  }
+});
+
+test("a starter rotates an oversized service log before the relay writes to it", async () => {
+  const f = await fixture();
+  try {
+    mkdirSync(f.options.directory, { mode: 0o700 });
+    const log = join(f.options.directory, "service.log");
+    writeFileSync(log, "x".repeat(5 * 1024 * 1024 + 1), { mode: 0o600 });
+    assert.equal((await ensureBridge(f.options)).running, true);
+    assert.equal(statSync(`${log}.1`).size, 5 * 1024 * 1024 + 1);
+    assert.ok(statSync(log).size < 1024 * 1024);
+    assert.equal(statSync(log).mode & 0o777, 0o600);
+  } finally {
     await f.close();
   }
 });

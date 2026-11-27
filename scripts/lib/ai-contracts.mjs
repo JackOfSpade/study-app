@@ -230,11 +230,6 @@ export function validateAnswer(job, answer, { final = false } = {}) {
       )
         fail("Return a nonempty bounded text string");
       if (
-        job.payload.mode === "terminal-dialogue" &&
-        (typeof answer.complete !== "boolean" || answer.text.length > 8000)
-      )
-        fail("Terminal dialogue requires complete:boolean and text:string");
-      if (
         job.payload.mode === "terminal-review" &&
         (answer.text.length > 8000 || !validProbeKnowledge(answer))
       )
@@ -242,6 +237,8 @@ export function validateAnswer(job, answer, { final = false } = {}) {
           "Terminal review requires text:string and, optionally, knowledge {facets:[{id,status:demonstrated,note?}]}",
         );
       if (job.payload.mode === "terminal-dialogue") {
+        if (typeof answer.complete !== "boolean" || answer.text.length > 8000)
+          fail("Terminal dialogue requires complete:boolean and text:string");
         if (!validProbeOutcome(answer))
           fail("Terminal dialogue outcome must be 'solved' or 'gap'");
         if (!validProbeKnowledge(answer))

@@ -16,15 +16,12 @@ const mime = {
   ".jpg": "image/jpeg",
   ".webp": "image/webp",
   ".ico": "image/x-icon",
-  ".mp3": "audio/mpeg",
-  ".wav": "audio/wav",
-  ".ogg": "audio/ogg",
   ".woff2": "font/woff2",
   ".md": "text/markdown; charset=utf-8",
 };
 
 /** Serve only a built client, keeping the existing browser origin and saves.
- * The bridge retains ownership of its credentials, queue and API validation. */
+ * The bridge keeps ownership of its credentials and API validation. */
 export async function createAppServer({
   directory = fileURLToPath(new URL("../dist", import.meta.url)),
   bridgePort = 4318,
@@ -70,13 +67,27 @@ export async function createAppServer({
           upstream.pipe(res);
         },
       );
+      // Why this server ended the proxy itself: such an error is no sign that
+      // the bridge died, so it is not restarted for it.
+      let ended;
+      const end = (why) => {
+        ended ??= why;
+        proxy.destroy();
+      };
       // An AI task legitimately outlasts this; the gateway enforces its own limit.
       if (req.url !== "/api/bridge")
-        proxy.setTimeout(65_000, () => proxy.destroy());
+        proxy.setTimeout(65_000, () => end("timeout"));
       proxy.on("error", () => {
-        reviveBridge();
+        if (ended === "client") return;
+        if (ended !== "timeout") reviveBridge();
         if (res.destroyed) return;
         if (res.headersSent) return res.destroy();
+        if (ended === "timeout") {
+          res.writeHead(504, { "Content-Type": "application/json" });
+          return res.end(
+            JSON.stringify({ error: "Study bridge did not answer in time" }),
+          );
+        }
         res.writeHead(502, { "Content-Type": "application/json" });
         res.end(
           JSON.stringify({
@@ -85,8 +96,8 @@ export async function createAppServer({
           }),
         );
       });
-      req.on("aborted", () => proxy.destroy());
-      res.on("close", () => proxy.destroy());
+      req.on("aborted", () => end("client"));
+      res.on("close", () => end("client"));
       req.pipe(proxy);
       return;
     }

@@ -752,6 +752,28 @@ function manualSpawn() {
   return { spawn, children };
 }
 
+test("a call stopped by its task timeout says it timed out", async () => {
+  const { spawn, children } = manualSpawn();
+  const rows = [];
+  const g = createClaudeGateway({
+    env,
+    cwd: dir,
+    validate: () => {},
+    spawn,
+    profileFor: (operation, payload) => ({
+      ...taskProfile(operation, payload),
+      timeoutMs: 30,
+    }),
+    usageLog: (row) => rows.push(row),
+  });
+  await assert.rejects(g.run("review-environment", { requestId: "slow" }), {
+    code: "CLAUDE_TIMEOUT",
+    message: /did not finish in time/,
+  });
+  assert.ok(children[0].killed);
+  assert.equal(rows.at(-1)?.outcome, "timeout");
+});
+
 test("a caller leaving does not stop a call a reload rejoins within the grace period", async () => {
   const { spawn, children } = manualSpawn();
   const g = createClaudeGateway({
