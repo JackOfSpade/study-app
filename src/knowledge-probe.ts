@@ -3,6 +3,7 @@ import {
   QUESTION_ADAPTATION_GUIDANCE,
   TUTOR_JUDGEMENT_GUIDANCE,
 } from "../scripts/lib/study-question-policy.mjs";
+import { FEEDBACK_LIMIT } from "./completion-verdict";
 import { scopeKey } from "./learning-model";
 import type { Contract, Encounter, StudyRecord, Problem } from "./model";
 import { isRecord as object } from "./records";
@@ -245,7 +246,7 @@ export const encounterProbeContract = (
   );
 
 /** Completion feedback is bounded by the completion verdict. */
-export const FEEDBACK_LIMIT = 8000;
+export { FEEDBACK_LIMIT };
 /**
  * The feedback recorded on the submission when the question is closed on a
  * declared gap. It always fits the completion verdict's bound: the gap list
@@ -462,6 +463,9 @@ export function probeSummary(
 }
 
 const gapKey = (encounter: string, facet: string) => `${encounter}#${facet}`;
+/** The stored reference from a gap or established record to its encounter. */
+export const knowledgeRef = (g: StudyRecord, e: Encounter) =>
+  `${e.runId ?? g.id}/${e.id}`;
 /** The declared parent of a sub-facet, for carried records. */
 function parentOf(e: Pick<Encounter, "probe">, facet: ProbeFacet) {
   if (!facet.partOf) return {};
@@ -532,7 +536,7 @@ export function recordProbeTurn(
   // A concession alone does not establish which parts are missing. Unasked
   // siblings stay unknown; only an explicit, question-bound finding is a gap.
   const gapFacets = state.facets.filter((f) => declared.has(f.id));
-  const encounterRef = `${e.runId ?? g.id}/${e.id}`;
+  const encounterRef = knowledgeRef(g, e);
   const existing = new Set(
     (g.study.knowledgeGaps ?? []).map((r) => gapKey(r.encounter, r.facet.id)),
   );
@@ -585,17 +589,18 @@ export function recordGapReview(
       : [];
   const open = encounterGaps(g, e).filter((r) => !r.resolved);
   const findings: ProbeFinding[] = [];
+  // Nothing below changes the probe until the turn is recorded after the loop.
+  const state = probeState(e);
   for (const f of reported) {
     if (!object(f) || f.status !== "demonstrated" || typeof f.id !== "string")
       continue;
+    const id = f.id;
     const gap = open.find(
-      (r) => r.facet.id === f.id || r.facet.id === facetId(f.id as string),
+      (r) => r.facet.id === id || r.facet.id === facetId(id),
     );
     if (!gap || findings.some((x) => x.id === gap.facet.id)) continue;
     // The facet must still stand as a gap in this question's own record.
-    if (
-      probeState(e).facets.find((x) => x.id === gap.facet.id)?.status !== "gap"
-    )
+    if (state.facets.find((x) => x.id === gap.facet.id)?.status !== "gap")
       continue;
     const note = shortText(f.note, 400);
     findings.push({
@@ -629,7 +634,7 @@ export const gapsClosedBy = (
   requestId: string | undefined,
 ): KnowledgeGapRecord[] => {
   if (!requestId) return [];
-  const ref = `${e.runId ?? g.id}/${e.id}`;
+  const ref = knowledgeRef(g, e);
   return encounterGaps(g, e).filter(
     (r) => r.resolved?.requestId === requestId && r.resolved.encounter === ref,
   );
@@ -649,7 +654,7 @@ function syncEstablished(
 ) {
   const problem = e.problem;
   if (!problem) return;
-  const encounterRef = `${e.runId ?? g.id}/${e.id}`;
+  const encounterRef = knowledgeRef(g, e);
   const records = (g.study.knowledgeEstablished ??= []);
   const established = probeState(e).facets.filter(
     (f) => f.status === "demonstrated" || f.status === "implied",
@@ -751,7 +756,7 @@ export function encounterEstablished(
   g: StudyRecord,
   e: Encounter,
 ): KnowledgeEstablishedRecord[] {
-  const ref = `${e.runId ?? g.id}/${e.id}`;
+  const ref = knowledgeRef(g, e);
   return (g.study.knowledgeEstablished ?? []).filter(
     (r) => r.encounter === ref,
   );
@@ -762,7 +767,7 @@ export function encounterGaps(
   g: StudyRecord,
   e: Encounter,
 ): KnowledgeGapRecord[] {
-  const ref = `${e.runId ?? g.id}/${e.id}`;
+  const ref = knowledgeRef(g, e);
   return (g.study.knowledgeGaps ?? []).filter((r) => r.encounter === ref);
 }
 

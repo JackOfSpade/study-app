@@ -855,12 +855,8 @@ function generationHtml(e: Encounter) {
   const clock = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
   const current = phase === "checking" ? 2 : 1;
   const steps = GENERATION_STEPS.map((label, i) => {
-    const text =
-      i === 1 && phase === "joining"
-        ? "Finishing the question Claude started preparing in the background"
-        : label;
     const state = i < current ? "done" : i === current ? "active" : "todo";
-    return `<li class="${state}">${escape(text)}</li>`;
+    return `<li class="${state}">${escape(label)}</li>`;
   }).join("");
   return `<div class="generation-progress" role="status"><div class="generation-bar" aria-hidden="true"><span></span></div><ol class="generation-steps">${steps}</ol><p class="generation-elapsed">Elapsed <strong>${clock}</strong>${seconds >= 60 ? " · Still working: a validated problem can take a few minutes." : ""}</p><p class="generation-note">You can leave immediately; the request is saved.</p></div>`;
 }

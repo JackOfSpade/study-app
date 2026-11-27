@@ -298,3 +298,57 @@ test("a record cut off mid-tutor-request is resumed after reload with the same p
     globalThis.fetch = original;
   }
 });
+
+test("a resumed request saved before help policies ignores malformed help and still settles", async () => {
+  const original = globalThis.fetch;
+  const calls: any[] = [];
+  let connected = true;
+  let respond: () => Promise<Response> = () => new Promise(() => {});
+  globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
+    if (String(url) === "/api/status")
+      return Response.json({
+        mode: connected ? "claude-cli" : "development",
+        label: "Synthetic",
+        detail: "No real AI",
+        capabilities: connected ? ["tutor"] : [],
+      });
+    calls.push(JSON.parse(String(init?.body)));
+    return respond();
+  }) as typeof fetch;
+  try {
+    await checkBridge();
+    const g = createRecord(718, r);
+    preparePracticeRooms(g, r);
+    const e = g.encounters["question-0"];
+    e.mode = "solo";
+    e.owner = "human";
+    void send(g, e, "My answer", r);
+    for (let i = 0; i < 50 && calls.length === 0; i++)
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    const loaded = recover(decode(encode(g)));
+    const saved = loaded.encounters[e.id];
+    const job = resumableTutorRequest(saved)!;
+    // Requests saved before help policies existed carry none, so the help
+    // gate never checks the declaration's shape.
+    const payload = JSON.parse(job.payloadJson);
+    delete payload.helpPolicy;
+    job.payloadJson = JSON.stringify(payload);
+    respond = async () =>
+      Response.json({
+        text: "What changes?",
+        complete: false,
+        help: { nudges: ["a"] },
+      });
+    await retryTutorRequest(loaded, saved, job.id, r);
+    assert.equal(job.state, "applied");
+    assert.equal(job.error, undefined);
+    const reply = saved.tutor.at(-1)!;
+    assert.equal(reply.kind, "tutor");
+    assert.equal(reply.text, "What changes?");
+    assert.equal(reply.help, undefined);
+  } finally {
+    connected = false;
+    await checkBridge();
+    globalThis.fetch = original;
+  }
+});

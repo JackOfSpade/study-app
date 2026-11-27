@@ -80,24 +80,15 @@ export function settleTutorRequest(
   releaseRequestContext(job, RELEASED_TUTOR_FIELDS);
 }
 
-/** Saved question session from the retired chat (structural; mirrors the model type). */
-interface SavedDirectStudy {
-  id: string;
-  provider: string;
-  payloadJson: string;
-  questionFingerprint: string;
-  state: "pending" | "interrupted" | "paused" | "applied" | "superseded";
-  responseDigest?: string;
-  error?: string;
-  transportPhase?: unknown;
-  transportPhaseAt?: number;
+/** A new message, or the next part, replaces any request left interrupted. */
+export function supersedeInterrupted(e: Encounter): void {
+  for (const job of e.tutorRequests ?? [])
+    if (job.state === "interrupted") settleTutorRequest(job, "superseded");
 }
-const directOf = (e: Encounter) =>
-  (e as { directStudy?: SavedDirectStudy }).directStudy;
 
 /** End a question at a run boundary without declaring its unanswered facets gaps. */
 export function closeDirectStudy(e: Encounter): void {
-  const s = directOf(e);
+  const s = e.directStudy;
   if (!s || !["pending", "interrupted", "paused"].includes(s.state)) return;
   s.state = "superseded";
   delete s.error;
@@ -112,7 +103,7 @@ export function releaseSettledRequests(e: Encounter, all = false): void {
   // The retired chat's session keeps its question, which loading checks. A
   // pending/interrupted direct question keeps its exact frozen payload even
   // when archived; only settled sessions may drop static context.
-  const direct = directOf(e);
+  const direct = e.directStudy;
   if (
     direct &&
     typeof direct.payloadJson === "string" &&
@@ -130,11 +121,11 @@ const DIRECT_STATES = new Set([
 ]);
 /** Validate a saved direct session as data; malformed sessions become interrupted. */
 export function recoverDirectStudy(e: Encounter): void {
-  const holder = e as { directStudy?: unknown };
-  if (holder.directStudy === undefined) return;
-  const s = holder.directStudy;
+  // Saved data: validated as unknown, whatever the model type says.
+  const s: unknown = e.directStudy;
+  if (s === undefined) return;
   if (!isRecord(s)) {
-    delete holder.directStudy;
+    delete e.directStudy;
     return;
   }
   const malformed = (reason: string) => {
@@ -162,16 +153,13 @@ export function recoverDirectStudy(e: Encounter): void {
   } catch {
     return malformed("payload");
   }
-  const p = payload as Record<string, unknown> | null;
   if (
-    !p ||
-    typeof p !== "object" ||
-    Array.isArray(p) ||
-    p.requestId !== s.id ||
-    p.questionFingerprint !== s.questionFingerprint ||
-    p.mode !== "terminal-direct" ||
-    !p.problem ||
-    typeof p.problem !== "object"
+    !isRecord(payload) ||
+    payload.requestId !== s.id ||
+    payload.questionFingerprint !== s.questionFingerprint ||
+    payload.mode !== "terminal-direct" ||
+    !payload.problem ||
+    typeof payload.problem !== "object"
   )
     return malformed("payload binding");
   if (s.state === "pending") {

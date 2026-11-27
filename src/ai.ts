@@ -1,5 +1,9 @@
 import { fnv1a } from "./hash";
-import { helpGateProblem, unlockedHelp } from "../scripts/lib/help-gate.mjs";
+import {
+  helpGateProblem,
+  unlockedHelp,
+  validHelp,
+} from "../scripts/lib/help-gate.mjs";
 import {
   closesPart,
   composePrompt,
@@ -8,7 +12,7 @@ import {
   stagedParts,
 } from "../scripts/lib/question-parts.mjs";
 import { requestStage } from "./question-parts";
-import { completionVerdict } from "./completion-verdict";
+import { completionVerdict, FEEDBACK_LIMIT } from "./completion-verdict";
 import { briefError, studyEvent } from "./study-events";
 import { careerScopeGuidance, studyFocus } from "./career-profile";
 import {
@@ -18,6 +22,7 @@ import {
   probeRecordsForTrack,
   concessionFeedback,
   encounterProbeContract,
+  knowledgeRef,
   probeFacets,
   recordGapReview,
   recordProbeTurn,
@@ -61,9 +66,10 @@ import {
   type Roadmap,
   type Submission,
   nextSeq,
+  PROVIDERS,
 } from "./model";
 import { reconcileRoadmap } from "./roadmap-adoption";
-import { settleTutorRequest } from "./run-learning";
+import { settleTutorRequest, supersedeInterrupted } from "./run-learning";
 import { assess } from "./learning-assessment";
 import {
   recordTopicAssessments,
@@ -90,7 +96,10 @@ const capturedProvider = (problem?: Problem): Provider =>
       ? problem.provenance
       : "claude-cli";
 const isAiProvenance = (p?: string): p is Provider =>
-  p === "study-mode" || p === "chatgpt-handoff" || p === "claude-cli";
+  !!p && PROVIDERS.includes(p);
+/** The private session a tutor request belongs to. */
+const privateSession = (g: StudyRecord, e: Encounter) =>
+  `${e.runId ?? g.id}/${e.id}/private`;
 function validateProblem(
   p: Problem,
   e: Encounter,
@@ -333,7 +342,7 @@ export function releaseRetiredChatRequests(g: StudyRecord) {
 }
 /** Where a question request is, for the progress display. The
  * request is one bridge call, so these are the client-side stages around it. */
-type GenerationPhase = "joining" | "writing" | "checking";
+type GenerationPhase = "writing" | "checking";
 const generationProgresses = new WeakMap<
   Encounter,
   { id: string; phase: GenerationPhase; startedAt: number }
@@ -495,9 +504,10 @@ export function regenerateQuestion(g: StudyRecord, e: Encounter, r: Roadmap) {
     asks: questionAsks(e.problem!),
   };
   const discarded = questionSummary(e.problem!);
-  const key = encounterKey(e);
-  const mine = (record: { encounter: string }) =>
-    record.encounter === key || record.encounter === e.id;
+  // Probe records are written with knowledgeRef. The learner's encounterKey
+  // (the same while runId is set) and the bare id match earlier saves.
+  const refs = new Set([knowledgeRef(g, e), encounterKey(e), e.id]);
+  const mine = (record: { encounter: string }) => refs.has(record.encounter);
   const study = g.study;
   if (study.knowledgeGaps)
     study.knowledgeGaps = study.knowledgeGaps.filter((x) => !mine(x));
@@ -717,7 +727,7 @@ export function retryTutorRequest(
       const payload = JSON.parse(job.payloadJson);
       if (
         payload.requestId !== job.id ||
-        payload.sessionId !== `${e.runId}/${e.id}/private` ||
+        payload.sessionId !== privateSession(g, e) ||
         !e.tutor.some(
           (m) => m.kind === "human" && m.seq === job.questionSequence,
         )
@@ -780,7 +790,7 @@ export function retryTutorRequest(
           typeof answer.complete !== "boolean")
       )
         throw Error("Invalid tutor reply");
-      if (dialogue && answer.text.length > 8000)
+      if (dialogue && answer.text.length > FEEDBACK_LIMIT)
         throw Error("Terminal reply exceeds 8000 characters");
       // The relay already rejects this; a reply that hints before the
       // learner was warned is never shown or recorded.
@@ -824,6 +834,12 @@ export function retryTutorRequest(
         dialogue && answer.complete === true && e.state !== "consumed"
           ? validateTopicAssessments(e, answer.topicAssessments)
           : [];
+      // A request saved before help policies existed skips the gate's shape
+      // check; malformed help is ignored, as unlockedHelp ignores it.
+      const help =
+        dialogue && answer.help !== undefined && validHelp(answer.help)
+          ? (answer.help as NonNullable<Message["help"]>)
+          : undefined;
       const delivered = message(
         g,
         e,
@@ -834,8 +850,7 @@ export function retryTutorRequest(
         job.questionSequence,
       );
       delivered.requestId = job.id;
-      const help = (answer as { help?: Message["help"] }).help;
-      if (dialogue && help)
+      if (help)
         delivered.help = {
           nudges: [...help.nudges],
           hints: [...help.hints],
@@ -981,8 +996,7 @@ export async function send(
   const problem = e.problem;
   if (!text.trim() || !problem) return;
   if (e.tutorRequests?.some((j) => j.state === "pending")) return;
-  for (const job of e.tutorRequests ?? [])
-    if (job.state === "interrupted") settleTutorRequest(job, "superseded");
+  supersedeInterrupted(e);
   delete e.error;
   const accepts = acceptHint ? offeredHelp(e) : [];
   message(g, e, "human", "human", text, "live-human", undefined, accepts);
@@ -993,60 +1007,63 @@ export async function send(
   }
   const provider = capturedProvider(problem);
   const id = `tutor-${g.id}-${e.id}-${g.seq}`;
-  const capture = () => ({
-    requestId: id,
-    sessionId: `${g.id}/${e.id}/private`,
-    ...(e.state !== "consumed"
-      ? {
-          mode: "terminal-dialogue",
-          responseFormat: TERMINAL_DIALOGUE_FORMAT,
-          instruction: TERMINAL_DIALOGUE_INSTRUCTION,
-          probe: encounterProbeContract(e, problem),
-          // Hints may follow only on facets the tutor already warned about.
-          helpPolicy: { unlocked: unlockedHelp(e.tutor) },
-          // Which part the learner can see, when the question has several.
-          ...(requestStage(e) ? { stage: requestStage(e) } : {}),
-          ...(g.study.profile === "live" && r
-            ? {
-                topicAssessmentContext: topicAssessmentContext(
-                  g,
-                  r,
-                  problem.contract,
-                ),
-              }
-            : {}),
-        }
-      : {
-          // The result is final; only a gap recorded here can still close.
-          mode: "terminal-review",
-          responseFormat: TERMINAL_REVIEW_FORMAT,
-          instruction: TERMINAL_REVIEW_INSTRUCTION,
-          review: reviewContract(g, e),
-        }),
-    problem: tutorProblem(problem),
-    workspace: e.workspace,
-    draftRevision: e.revision,
-    submissions: e.submissions.slice(-5).map((s) => ({
-      id: s.id,
-      revision: s.revision,
-      content: s.content,
-      status: s.status,
-      feedback: s.feedback,
-    })),
-    messages: structuredClone(e.tutor),
-    executions: (e.executions ?? [])
-      .filter((j) => j.status === "finished")
-      .map(executionEvidence),
-    learning: problem.contract,
-    prompt: text,
-    curriculum: r.tracks[problem.contract.track].curriculum,
-    progressContext: [
-      trackProgressContext(g.study.learner, r, problem.contract.track),
-      knowledgeProbeContext(g, problem.contract.track),
-    ]
-      .filter(Boolean)
-      .join("\n\n"),
-  });
+  const capture = () => {
+    const stage = requestStage(e);
+    return {
+      requestId: id,
+      sessionId: privateSession(g, e),
+      ...(e.state !== "consumed"
+        ? {
+            mode: "terminal-dialogue",
+            responseFormat: TERMINAL_DIALOGUE_FORMAT,
+            instruction: TERMINAL_DIALOGUE_INSTRUCTION,
+            probe: encounterProbeContract(e, problem),
+            // Hints may follow only on facets the tutor already warned about.
+            helpPolicy: { unlocked: unlockedHelp(e.tutor) },
+            // Which part the learner can see, when the question has several.
+            ...(stage ? { stage } : {}),
+            ...(g.study.profile === "live" && r
+              ? {
+                  topicAssessmentContext: topicAssessmentContext(
+                    g,
+                    r,
+                    problem.contract,
+                  ),
+                }
+              : {}),
+          }
+        : {
+            // The result is final; only a gap recorded here can still close.
+            mode: "terminal-review",
+            responseFormat: TERMINAL_REVIEW_FORMAT,
+            instruction: TERMINAL_REVIEW_INSTRUCTION,
+            review: reviewContract(g, e),
+          }),
+      problem: tutorProblem(problem),
+      workspace: e.workspace,
+      draftRevision: e.revision,
+      submissions: e.submissions.slice(-5).map((s) => ({
+        id: s.id,
+        revision: s.revision,
+        content: s.content,
+        status: s.status,
+        feedback: s.feedback,
+      })),
+      messages: structuredClone(e.tutor),
+      executions: (e.executions ?? [])
+        .filter((j) => j.status === "finished")
+        .map(executionEvidence),
+      learning: problem.contract,
+      prompt: text,
+      curriculum: r.tracks[problem.contract.track].curriculum,
+      progressContext: [
+        trackProgressContext(g.study.learner, r, problem.contract.track),
+        knowledgeProbeContext(g, problem.contract.track),
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+    };
+  };
   let payloadJson: string;
   try {
     payloadJson = JSON.stringify(capture());
@@ -1073,7 +1090,6 @@ export function applyCompletion(
   r: Roadmap,
   s: Submission,
   result: ReturnType<typeof completionVerdict>,
-  onAssessment?: () => void,
 ) {
   if ((e.state as string) === "consumed" || g.encounters[e.id] !== e) {
     if (e.accepted === s.id) return;
@@ -1100,8 +1116,10 @@ export function applyCompletion(
     e.revision = s.revision;
     finishVisit(r, g.study, e);
     // Variety practice records probe knowledge but is never assessed as a visit.
+    // runAssessment records its own failures; this only keeps an unexpected
+    // throw from becoming an unhandled rejection.
     if (!e.problem?.contract.practice)
-      void assess(g, e, r, s.seq).then(onAssessment, onAssessment);
+      void assess(g, e, r, s.seq).catch(() => {});
   } else {
     e.state = "in-progress";
   }
@@ -1112,7 +1130,7 @@ export function completeQuestion(
   g: StudyRecord,
   e: Encounter,
   submissionId: string,
-  provenance: string,
+  feedback: string,
 ) {
   if (e.state === "consumed") return false;
   e.state = "consumed";
@@ -1121,7 +1139,7 @@ export function completeQuestion(
   const submission = e.submissions.find((s) => s.id === submissionId);
   if (submission) {
     submission.status = "complete";
-    submission.feedback = provenance;
+    submission.feedback = feedback;
     e.workspace = submission.content;
     e.revision = submission.revision;
   }
@@ -1130,7 +1148,7 @@ export function completeQuestion(
     seq: nextSeq(g),
     author: "system",
     kind: "completion",
-    text: `Study question completed. ${provenance}`,
+    text: `Study question completed. ${feedback}`,
     at: g.time,
     revision: e.revision,
   });
@@ -1191,15 +1209,15 @@ export function reconcileUploadedRoadmap(
     r,
     candidate,
     async (payload) => {
-      if (!live(g) || status().mode !== provider)
-        throw Error(
-          "Reconnect the original roadmap review provider; captured files remain saved",
-        );
+      const ensure = () => {
+        if (!live(g) || status().mode !== provider)
+          throw Error(
+            "Reconnect the original roadmap review provider; captured files remain saved",
+          );
+      };
+      ensure();
       await captured?.();
-      if (!live(g) || status().mode !== provider)
-        throw Error(
-          "Reconnect the original roadmap review provider; captured files remain saved",
-        );
+      ensure();
       return request("reconcile-roadmap", payload);
     },
     retryId,

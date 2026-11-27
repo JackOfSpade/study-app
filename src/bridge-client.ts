@@ -1,13 +1,14 @@
 import { isRecord } from "./records";
 /** Provider transport only; learning stays in its owning modules. */
-type DisconnectReason =
-  "relay-unreachable" | "gateway-off" | "cli-missing" | "signed-out";
-const REASONS: readonly unknown[] = [
+const REASONS = [
   "relay-unreachable",
   "gateway-off",
   "cli-missing",
   "signed-out",
-];
+] as const;
+type DisconnectReason = (typeof REASONS)[number];
+const isReason = (v: unknown): v is DisconnectReason =>
+  (REASONS as readonly unknown[]).includes(v);
 export interface BridgeStatus {
   /** "development" means Claude is not connected, so questions are locked. */
   mode: "development" | "claude-cli";
@@ -44,9 +45,7 @@ export async function checkBridge() {
       bridgeStatus = {
         mode: info.mode,
         label: info.label,
-        ...(REASONS.includes(info.reason)
-          ? { reason: info.reason as DisconnectReason }
-          : {}),
+        ...(isReason(info.reason) ? { reason: info.reason } : {}),
         capabilities: info.capabilities,
         detail: info.detail,
       };
@@ -64,6 +63,10 @@ export async function checkBridge() {
 }
 /** How long one request waits for the bridge to answer. */
 const REQUEST_TIMEOUT_MS = 30 * 60_000;
+const INTERRUPTED_MESSAGE =
+  "The connection to the study relay was lost before the reply arrived. The saved request is sent again automatically once the relay is reachable.";
+const ENDED_EARLY_MESSAGE =
+  "The reply ended before its answer arrived. The saved request is sent again automatically.";
 /**
  * The request never got its answer because the way to the relay was cut: the
  * page was closing or reloading, the relay was restarting or unreachable, or
@@ -78,13 +81,11 @@ export class BridgeInterrupted extends Error {
     super(message);
   }
 }
-export const INTERRUPTED_MESSAGE =
-  "The connection to the study relay was lost before the reply arrived. The saved request is sent again automatically once the relay is reachable.";
 /** Whether a failed request may be sent again unchanged without asking. */
 export const isInterruption = (error: unknown) =>
   error instanceof BridgeInterrupted;
-/** True once the request's own wait budget or its owner ended it: a failure
- * after that is that decision, never a cut line. */
+/** True once the request's own wait budget ended it: a failure after that is
+ * that decision, never a cut line. */
 type Decided = () => boolean;
 const cutUnlessDecided = (decided: Decided, error: unknown) => {
   if (decided()) return error;
@@ -155,12 +156,21 @@ async function readStream(
       }
       const { value, done } = chunk;
       if (done) {
-        // A final line may arrive without its newline.
-        const answer = streamEvent(buffer, onText);
+        // A final line may arrive without its newline. The relay ends every
+        // line with one, so leftover text that is not JSON was cut off.
+        let answer;
+        try {
+          answer = streamEvent(buffer, onText);
+        } catch (error) {
+          if (
+            !(error instanceof Error) ||
+            error.message !== "Malformed bridge response" ||
+            !buffer.trim()
+          )
+            throw error;
+        }
         if (answer) return answer;
-        throw new BridgeInterrupted(
-          "The reply ended before its answer arrived. The saved request is sent again automatically.",
-        );
+        throw new BridgeInterrupted(ENDED_EARLY_MESSAGE);
       }
       buffer += value;
       let at;
@@ -176,14 +186,8 @@ async function readStream(
   }
 }
 interface BridgeRequestOptions {
-  /** Cancel optional presentation work when its owner is no longer active. */
-  signal?: AbortSignal;
-  /** Wait budget; bounded to REQUEST_TIMEOUT_MS. */
-  timeoutMs?: number;
   /** Receives the reply's text so far while Claude CLI is still writing it. */
   onText?: (text: string) => void;
-  /** Stop waiting once the request's owner is gone. */
-  isActive?: () => boolean;
 }
 /** T describes the operation reply; domain callers still validate its contents. */
 export async function bridgeRequest<T extends object = Record<string, unknown>>(
@@ -191,37 +195,27 @@ export async function bridgeRequest<T extends object = Record<string, unknown>>(
   payload: unknown,
   options?: BridgeRequestOptions,
 ) {
-  if (options?.isActive?.() === false)
-    throw Error("Study session closed; saved work retained");
   const provider = status().mode;
-  const requested = options?.timeoutMs;
-  const budget =
-    typeof requested === "number" && Number.isFinite(requested) && requested > 0
-      ? Math.min(requested, REQUEST_TIMEOUT_MS)
-      : REQUEST_TIMEOUT_MS;
   const timeout = AbortSignal.timeout(
-    provider === "claude-cli" ? budget : Math.min(budget, 45000),
+    provider === "claude-cli" ? REQUEST_TIMEOUT_MS : 45000,
   );
-  const signal = options?.signal
-    ? AbortSignal.any([timeout, options.signal])
-    : timeout;
   const body = JSON.stringify({
     operation,
     payload,
     provider,
     ...(provider === "claude-cli" && options?.onText ? { stream: true } : {}),
   });
-  const decided = () => !!options?.signal?.aborted || timeout.aborted;
+  const decided = () => timeout.aborted;
   let r: Response;
   try {
     r = await fetch("/api/bridge", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body,
-      signal,
+      signal: timeout,
     });
   } catch (error) {
-    // The owner's own cancel and the wait budget are decisions, not a cut line.
+    // The wait budget running out is a decision, not a cut line.
     throw cutUnlessDecided(decided, error);
   }
   if (
