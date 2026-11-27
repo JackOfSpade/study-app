@@ -102,6 +102,59 @@ test("actual relay reports a gateway failure without taking itself down", async 
     await close(relay);
   }
 });
+test("actual relay hides an uncoded internal failure behind a fixed, logged message", async () => {
+  const claude = {
+    enabled: () => true,
+    async run() {
+      throw new TypeError("Cannot read properties of null (reading 'mode')");
+    },
+  };
+  const relay = createStudyBridgeServer({ claude });
+  const base = await listen(relay);
+  const logged: unknown[] = [];
+  const original = console.error;
+  console.error = (...args: unknown[]) => void logged.push(args);
+  try {
+    const post = (stream: boolean) =>
+      fetch(base + "api/bridge", {
+        method: "POST",
+        body: JSON.stringify({ operation: "tutor", payload: {}, stream }),
+      });
+    const plain = await post(false);
+    assert.equal(plain.status, 502);
+    assert.deepEqual(await plain.json(), {
+      error: "Study bridge request failed",
+    });
+    const streamed = await post(true);
+    assert.equal(streamed.status, 200);
+    assert.deepEqual(JSON.parse((await streamed.text()).trim()), {
+      error: "Study bridge request failed",
+    });
+    assert.equal(logged.length, 2);
+    assert.match(String(logged[0]), /reading 'mode'/);
+  } finally {
+    console.error = original;
+    await close(relay);
+  }
+});
+test("actual relay rejects a payload that is not an object before any gateway call", async () => {
+  const claude = fakeGateway();
+  const relay = createStudyBridgeServer({ claude });
+  const base = await listen(relay);
+  try {
+    for (const payload of [null, "abc", [1], 3, undefined]) {
+      const response = await fetch(base + "api/bridge", {
+        method: "POST",
+        body: JSON.stringify({ operation: "tutor", payload }),
+      });
+      assert.equal(response.status, 400);
+      assert.deepEqual(await response.json(), { error: "Invalid payload" });
+    }
+    assert.equal(claude.calls.length, 0);
+  } finally {
+    await close(relay);
+  }
+});
 test("actual relay preserves UTF-8 split across network chunks and bounds incoming bytes", async () => {
   const claude = fakeGateway();
   const relay = createStudyBridgeServer({ claude });

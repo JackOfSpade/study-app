@@ -7,6 +7,7 @@ import {
   openSync,
   readFileSync,
   realpathSync,
+  renameSync,
   unlinkSync,
   writeSync,
 } from "node:fs";
@@ -15,17 +16,17 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { sha256 } from "./lib/digest.mjs";
 import { assertOwnerOnly, privateDirectory } from "./lib/private-fs.mjs";
 const project = fileURLToPath(new URL("../", import.meta.url));
-export const defaults = {
+const defaults = {
   directory: join(project, ".local/bridge-service"),
   root: project,
   port: 4318,
   entry: fileURLToPath(new URL("./bridge-server.mjs", import.meta.url)),
 };
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-// The relay validates its whole durable queue before it can report ready; that
-// takes seconds near the queue's byte cap, and killing it would never let it
-// finish compacting the queue that made it slow.
+// A generous allowance for a slow machine; a concurrent starter waits out the
+// same allowance.
 const STARTUP_TIMEOUT_MS = 60_000;
+const SERVICE_LOG_LIMIT = 5 * 1024 * 1024;
 class BridgeTransportError extends Error {}
 const unavailable = (method) =>
   new BridgeTransportError(
@@ -141,8 +142,7 @@ async function retireMovedRecord(o, owner) {
     if (error.code !== "ENOENT") throw error;
   }
 }
-/** Start once, or reconnect to this project's already-authenticated service.
- * No sharing, OAuth or worker-session setting is changed by this operation. */
+/** Start once, or reconnect to this project's already-running service. */
 export async function ensureBridge(options = {}) {
   const o = optionsFor(options);
   privateDirectory(o.directory);
@@ -190,7 +190,14 @@ export async function ensureBridge(options = {}) {
           abandoned = Date.now() - stat.mtimeMs > 5000;
         else throw error;
       }
-      if (abandoned && lstatSync(lock).ino === stat.ino) unlinkSync(lock);
+      // A concurrent starter may remove the abandoned lock first.
+      if (abandoned) {
+        try {
+          if (lstatSync(lock).ino === stat.ino) unlinkSync(lock);
+        } catch (error) {
+          if (error.code !== "ENOENT") throw error;
+        }
+      }
       await pause(50);
     }
   }
@@ -208,6 +215,8 @@ export async function ensureBridge(options = {}) {
         kind: "file",
         message: "Unsafe bridge log",
       });
+      // Only the log's tail is read; keep one older generation.
+      if (stat.size > SERVICE_LOG_LIMIT) renameSync(log, `${log}.1`);
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
     }
@@ -294,7 +303,7 @@ async function stopVerified(o, owner) {
   const live = await request(o, owner);
   if (!live) return { running: false };
   if (!(await request(o, owner, "POST"))) return { running: false };
-  // Shutdown can synchronously persist a large queue before closing sockets.
+  // Shutdown closes open connections before exiting.
   // Once acknowledged, temporary silence is expected; it is not permission
   // to kill or replace a listener. Keep all ownership checks on every reply.
   // One in-flight status request can add at most its one-second timeout.

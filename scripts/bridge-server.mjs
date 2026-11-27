@@ -2,14 +2,17 @@ import { safeEqual } from "./lib/safe-equal.mjs";
 import { pathToFileURL } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { createClaudeGateway } from "./claude-gateway.mjs";
-import { createStudyBridgeServer } from "./study-bridge-server.mjs";
+import {
+  claudeConnection,
+  createStudyBridgeServer,
+} from "./study-bridge-server.mjs";
 import { privateDirectory, writePrivate } from "./lib/private-fs.mjs";
 import { createBugReports } from "./bug-report-route.mjs";
 import { stampConsole } from "./lib/stamp-console.mjs";
 
 /** This process owns AI calls and code execution. Launchers may disconnect
  * without ending it. */
-export async function startBridgeService(boot, options = {}) {
+async function startBridgeService(boot, options = {}) {
   if (
     boot.version !== 1 ||
     !/^[a-f0-9]{64}$/.test(boot.token) ||
@@ -57,10 +60,7 @@ export async function startBridgeService(boot, options = {}) {
           path: join(local, "production", "service.log"),
         },
       ],
-      status: async () =>
-        !claude?.enabled()
-          ? "gateway-off"
-          : ((await claude.connection?.()) ?? "connected"),
+      status: () => claudeConnection(claude),
     }),
     control: {
       route(req, res) {

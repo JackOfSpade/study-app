@@ -15,6 +15,7 @@ import { delimiter, dirname, join } from "node:path";
 import { taskInstructions, validateAnswer } from "./lib/ai-contracts.mjs";
 import { fillOmittedHelp, helpStreamGate } from "./lib/help-gate.mjs";
 import { isRecord } from "./lib/is-record.mjs";
+import { FINDING_STATUSES, OUTCOMES } from "./lib/probe-reply.mjs";
 import { privateDirectory, writePrivate } from "./lib/private-fs.mjs";
 
 /** Every AI task's model and effort: the measured quality knee from the
@@ -39,7 +40,7 @@ const KNOWLEDGE_NOTES =
   /(?:^|\n\n)(?=Facets already established at earlier (?:questions|terminals)|Learner-declared knowledge gaps recorded at earlier (?:questions|terminals)|Gaps since closed:)/;
 /** macOS allows about 1 MB for a process's arguments and environment together. */
 const MAX_SYSTEM_BYTES = 700_000;
-export const TASK_PROFILES = Object.freeze({
+const TASK_PROFILES = Object.freeze({
   generate: {
     ...authoring(),
     stableKeys: ["curriculum", "generationPolicy", "runtimeSupport"],
@@ -182,7 +183,7 @@ export function buildPrompt(
   };
 }
 
-export class ClaudeGatewayError extends Error {
+class ClaudeGatewayError extends Error {
   constructor(code, message, status = 502) {
     super(message);
     this.code = code;
@@ -583,8 +584,6 @@ export function replyShape({ operation, payload }, answer) {
   return { ...tutorShape(payload, answer), ...staged };
 }
 const TUTOR_MODES = new Set(["terminal-dialogue", "terminal-review"]);
-const FACET_STATUSES = ["demonstrated", "implied", "gap"];
-const OUTCOMES = new Set(["solved", "gap"]);
 const count = (value) => (Array.isArray(value) ? value.length : 0);
 /** A tutor reply as counts and enums only: which conversation mode and turn it
  * answered, whether it closed the question, how far up the hint ladder it went
@@ -598,7 +597,7 @@ function tutorShape(payload, answer) {
     shape.complete = answer?.complete === true;
     // `outcome` is the call's own field (accepted, rejected...); the reply's
     // solved/gap goes under `verdict` so it never overwrites it.
-    if (OUTCOMES.has(answer?.outcome)) shape.verdict = answer.outcome;
+    if (OUTCOMES.includes(answer?.outcome)) shape.verdict = answer.outcome;
     const help = answer?.help;
     if (help && typeof help === "object")
       shape.help = {
@@ -615,7 +614,7 @@ function tutorShape(payload, answer) {
     : [];
   if (facets.length)
     shape.facets = Object.fromEntries(
-      FACET_STATUSES.map((status) => [
+      FINDING_STATUSES.map((status) => [
         status,
         facets.filter((f) => f?.status === status).length,
       ]),
@@ -660,11 +659,11 @@ function replaySampleSink(directory) {
         `${sample.at.replace(/:/g, "-")}-${randomBytes(4).toString("hex")}.json`,
       );
       writePrivate(file, `${JSON.stringify(sample)}\n`);
-      const keep = REPLAY_KEEP;
       const names = readdirSync(folder)
         .filter((name) => name.endsWith(".json"))
         .sort();
-      for (const name of names.slice(0, Math.max(0, names.length - keep)))
+      const excess = Math.max(0, names.length - REPLAY_KEEP);
+      for (const name of names.slice(0, excess))
         rmSync(join(folder, name), { force: true });
     } catch (error) {
       warn(error);
@@ -817,11 +816,15 @@ export function createClaudeGateway({
             ),
           );
         if (!result || result.is_error || result.subtype !== "success")
-          return finish(classifyFailure(result, stderr, code));
-        if (
-          !model?.includes(`-${profile.model}-`) &&
-          !model?.includes(profile.model)
-        )
+          return finish(
+            timedOut
+              ? new ClaudeGatewayError(
+                  "CLAUDE_TIMEOUT",
+                  "Claude did not finish in time. Your work is saved; retry.",
+                )
+              : classifyFailure(result, stderr, code),
+          );
+        if (!model?.includes(profile.model))
           return finish(
             new ClaudeGatewayError(
               "CLAUDE_WRONG_MODEL",
@@ -835,9 +838,10 @@ export function createClaudeGateway({
         `${JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "text", text: user }] } })}\n`,
       );
     });
-  async function execute(operation, payload, signal, streamText) {
+  async function execute(operation, payload, signal, onText) {
     const profile = resolveProfile(operation, payload);
-    const onText = streamText;
+    const dialogue =
+      operation === "tutor" && payload?.mode === "terminal-dialogue";
     const { system, user, compact } = buildPrompt(operation, payload);
     if (compact)
       console.warn(
@@ -879,7 +883,7 @@ export function createClaudeGateway({
       };
       let prompt = user,
         problem;
-      // A rejected answer gets one correction, as the worker chat's retry did.
+      // A rejected answer gets one correction.
       const attempts = 2;
       for (let attempt = 0; attempt < attempts; attempt++) {
         if (signal?.aborted) throw cancelled();
@@ -907,20 +911,15 @@ export function createClaudeGateway({
               'The reply was not one valid JSON object. Write a single JSON object with every required field, and inside a string value write each double quote as \\" and each line break as \\n',
             );
           const answer = trimmedKeys(parsed);
-          // A tutor turn that gives no verdict at all is a follow-up, never
-          // a completion: it continues the conversation and awards nothing.
-          if (
-            operation === "tutor" &&
-            payload?.mode === "terminal-dialogue" &&
-            answer.complete === undefined &&
-            answer.outcome === undefined
-          ) {
-            answer.complete = false;
-            console.error(
-              `Tutor reply (attempt ${attempt}) omitted complete; read as complete:false`,
-            );
-          }
-          if (operation === "tutor" && payload?.mode === "terminal-dialogue") {
+          if (dialogue) {
+            // A tutor turn that gives no verdict at all is a follow-up, never
+            // a completion: it continues the conversation and awards nothing.
+            if (answer.complete === undefined && answer.outcome === undefined) {
+              answer.complete = false;
+              console.error(
+                `Tutor reply (attempt ${attempt}) omitted complete; read as complete:false`,
+              );
+            }
             const filled = fillOmittedHelp(payload, answer);
             if (filled)
               console.error(
@@ -1052,7 +1051,7 @@ export function createClaudeGateway({
     return entry.promise;
   }
   /** Whether a learner request could reach Claude now. A check that cannot
-   * conclude does not lock the terminals: the request itself reports the failure. */
+   * conclude does not lock the workspace: the request itself reports the failure. */
   let checked, checking;
   const checkConnection = () =>
     new Promise((resolve) => {

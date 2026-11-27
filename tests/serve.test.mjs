@@ -142,6 +142,44 @@ test("production forwards exact API bodies/origins and reports relay outages", a
   assert.equal(restarts(), 1);
 });
 
+test("a caller leaving mid-request does not restart a healthy bridge", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "study-production-"));
+  await writeFile(
+    join(directory, "index.html"),
+    "<title>Synthetic app</title>",
+  );
+  let reached;
+  const arrived = new Promise((resolve) => (reached = resolve));
+  // A bridge still working on an AI task: it never answers in this test.
+  const bridge = createServer(() => reached());
+  const bridgePort = await listen(bridge);
+  let restarts = 0;
+  const server = await createAppServer({
+    directory,
+    bridgePort,
+    restartBridge: async () => {
+      restarts++;
+    },
+  });
+  const port = await listen(server);
+  t.after(async () => {
+    await close(server);
+    await close(bridge);
+    await rm(directory, { recursive: true, force: true });
+  });
+  const leaving = new AbortController();
+  const pending = fetch(`http://127.0.0.1:${port}/api/bridge`, {
+    method: "POST",
+    body: "{}",
+    signal: leaving.signal,
+  });
+  await arrived;
+  leaving.abort();
+  await assert.rejects(pending);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(restarts, 0);
+});
+
 test("production refuses startup without a built entry point", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "study-no-build-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
