@@ -1,5 +1,9 @@
 import { browserSpecText } from "../scripts/browser-runner/spec.mjs";
-import type { ExecutionReceipt, WorkspaceExecution } from "./execution";
+import {
+  executedReceiptMatches,
+  type ExecutionReceipt,
+  type WorkspaceExecution,
+} from "./execution";
 import { finalRequirements } from "./final-requirements";
 import { encounterKey } from "./learner";
 import type { Artifact, StudyRecord, Roadmap } from "./model";
@@ -41,6 +45,31 @@ export interface EnvironmentObservation {
     authorshipAndAssistance:
       | "unassessed; full attributed work and tutor history remain in the full backup"
       | "unassessed; full attributed work and tutor history remain in the game backup";
+  };
+}
+type FingerprintedContent = Pick<
+  EnvironmentObservation,
+  | "sourceHash"
+  | "envId"
+  | "sourceScope"
+  | "profile"
+  | "learnerStatement"
+  | "suppliedOutput"
+  | "execution"
+>;
+/** What an observation's fingerprint covers, in the exact key order hashed at
+ * capture. Changing it invalidates every saved observation. */
+export function observationFingerprintContent(
+  o: FingerprintedContent,
+): FingerprintedContent {
+  return {
+    sourceHash: o.sourceHash,
+    envId: o.envId,
+    sourceScope: o.sourceScope,
+    profile: o.profile,
+    learnerStatement: o.learnerStatement,
+    suppliedOutput: o.suppliedOutput,
+    execution: o.execution,
   };
 }
 interface EnvironmentObservationInput {
@@ -161,15 +190,14 @@ export async function recordEnvironmentObservation(
           revision,
         }));
     if (
-      receipt.language !== job.language ||
-      receipt.environment !== job.environment ||
-      (job.environment === "react" &&
-        receipt.specHash !==
-          (await sha256(browserSpecText(job.code, job.steps)))) ||
-      receipt.codeHash !== (await sha256(job.code)) ||
-      !/^sha256:[a-f0-9]{64}$/.test(receipt.imageId ?? "") ||
-      typeof receipt.stdout !== "string" ||
-      typeof receipt.stderr !== "string"
+      !executedReceiptMatches(
+        receipt,
+        job,
+        await sha256(job.code),
+        job.environment === "react"
+          ? await sha256(browserSpecText(job.code, job.steps))
+          : undefined,
+      )
     )
       throw Error("Runner receipt does not match this captured workspace");
     execution = {
@@ -201,7 +229,11 @@ export async function recordEnvironmentObservation(
         provenance: "learner-supplied-unreviewed" as const,
       }
     : undefined;
-  const body = { ...value, suppliedOutput, execution },
+  const body = observationFingerprintContent({
+      ...value,
+      suppliedOutput,
+      execution,
+    }),
     fingerprint = await sha256(JSON.stringify(body));
   if (g.study !== study)
     throw Error(

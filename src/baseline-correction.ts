@@ -1,6 +1,6 @@
-import { facetProofValid, independentProofValid } from "./historical-proof";
+import { facetProofValid, scopeIndependentlyProven } from "./historical-proof";
 import { historicalScope } from "./historical-scope";
-import { reviewSignature, type LearnerLedger } from "./learning-model";
+import { reviewSignature, trackOf, type LearnerLedger } from "./learning-model";
 import type { Roadmap } from "./model";
 import {
   baselineCheckpointRefs,
@@ -8,7 +8,7 @@ import {
   observationInvalidated,
 } from "./observation-validity";
 import type { RoadmapReconciliation } from "./roadmap-adoption-types";
-import { CELL_SEPARATOR } from "./table-row";
+import { tableCells } from "./table-row";
 
 /** A terminal audit alone cannot retract a trusted original checkpoint.
  * Require explicit whole-scope review of its complete attributed history. */
@@ -57,12 +57,7 @@ export function reviewBaselineCorrections(
           throw Error(
             "Original baseline correction requires an explicit complete historical-scope review with every facet mapped",
           );
-        const rows = history.evidenceRows.map((row) =>
-          row
-            .split(CELL_SEPARATOR)
-            .slice(1, -1)
-            .map((c) => c.trim()),
-        );
+        const rows = history.evidenceRows.map(tableCells);
         if (!support.every((ref) => rows.some((c) => c[0] === ref)))
           throw Error(
             "Baseline support must have exact historical scope records",
@@ -151,17 +146,7 @@ export function preserveLaterBaselineEvidence(
           "Baseline correction must preserve unaffected observed facets and their current evidence",
         );
     }
-    const complete =
-      work.verifiedScopes.includes(id) &&
-      d.facets.every((f) => {
-        const proof = current.facets[`D${d.depth}:${f.id}`];
-        return (
-          proof?.outcome === "independent" &&
-          proof.evidenceIds.some((ref) =>
-            independentProofValid(r, work, d.objectiveId, d.depth, f.id, ref),
-          )
-        );
-      });
+    const complete = scopeIndependentlyProven(r, work, id, current.facets);
     const currentFailure = previous.states[d.depth - 1] === "R";
     const negative = d.facets.some((f) => {
       const proof = current.facets[`D${d.depth}:${f.id}`];
@@ -205,9 +190,9 @@ export function preserveLaterBaselineEvidence(
       throw Error(
         "Baseline correction with unqualified later verified retention requires dedicated retention reassessment",
       );
-    const next = parsed.tracks[
-      d.objectiveId.startsWith("PY:") ? "PY" : "PE"
-    ].objectives.find((o) => o.id === d.objectiveId)!.cells[d.depth - 1];
+    const next = parsed.tracks[trackOf(d.objectiveId)].objectives.find(
+      (o) => o.id === d.objectiveId,
+    )!.cells[d.depth - 1];
     if (
       (currentFailure && next !== "R") ||
       (!currentFailure && complete && next !== "P")

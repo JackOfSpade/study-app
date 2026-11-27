@@ -11,14 +11,21 @@ import {
   type Roadmap,
 } from "./model";
 import { sha256 } from "./digest";
+import { isRecord } from "./records";
 
+export const EXECUTION_STATUSES = [
+  "completed",
+  "timeout",
+  "output-limit",
+  "resource-limit",
+  "unavailable",
+] as const;
 export interface ExecutionReceipt {
   id: string;
   language: "python" | "typescript";
   environment?: "react";
   specHash?: string;
-  status:
-    "completed" | "timeout" | "output-limit" | "resource-limit" | "unavailable";
+  status: (typeof EXECUTION_STATUSES)[number];
   executed: boolean;
   codeHash?: string;
   imageId?: string;
@@ -36,10 +43,14 @@ interface ExecutionPreview {
   sha256: string;
 }
 async function validatePreview(value: unknown): Promise<ExecutionPreview> {
-  const p = value as ExecutionPreview;
   if (
-    !p ||
-    typeof p.dataUrl !== "string" ||
+    !isRecord(value) ||
+    typeof value.dataUrl !== "string" ||
+    typeof value.sha256 !== "string"
+  )
+    throw Error("Invalid browser preview");
+  const p = value as unknown as ExecutionPreview;
+  if (
     p.dataUrl.length > 180025 ||
     !/^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/.test(p.dataUrl) ||
     p.width !== 640 ||
@@ -107,6 +118,27 @@ export function executionEvidence(job: WorkspaceExecution) {
   };
 }
 
+/** Whether an executed receipt belongs to the code and task checks that were
+ * sent. Callers hash the code (and, for React, the browser spec) beforehand. */
+export function executedReceiptMatches(
+  receipt: ExecutionReceipt,
+  job: Pick<WorkspaceExecution, "language" | "environment">,
+  codeHash: string,
+  specHash?: string,
+) {
+  return (
+    receipt.language === job.language &&
+    receipt.environment === job.environment &&
+    (job.environment !== "react" || receipt.specHash === specHash) &&
+    receipt.codeHash === codeHash &&
+    /^sha256:[a-f0-9]{64}$/.test(receipt.imageId ?? "") &&
+    typeof receipt.stdout === "string" &&
+    typeof receipt.stderr === "string"
+  );
+}
+
+/** Run eligibility. No UI starts a run at present; `runWorkspace` is the Docker
+ * runner's client and is driven by the runner test suites. */
 export function canRunWorkspace(g: StudyRecord, e: Encounter, r: Roadmap) {
   if (
     !e.problem?.runtime ||
@@ -174,35 +206,30 @@ export async function runWorkspace(g: StudyRecord, e: Encounter, r: Roadmap) {
       signal: AbortSignal.timeout(job.environment === "react" ? 35000 : 20000),
     });
     const raw = await response.text();
-    let packet: ExecutionReceipt & { error?: string; preview?: unknown };
+    let packet: unknown;
     try {
       packet = JSON.parse(raw);
     } catch {
       throw Error(`Runner unavailable (HTTP ${response.status})`);
     }
-    const { preview, ...receipt } = packet;
+    if (!isRecord(packet))
+      throw Error(`Runner unavailable (HTTP ${response.status})`);
+    const { preview, ...receipt } = packet as unknown as ExecutionReceipt & {
+      error?: string;
+      preview?: unknown;
+    };
     if (!response.ok && receipt.status !== "unavailable")
       throw Error(receipt.error ?? "Runner request failed");
     if (
-      !receipt ||
       typeof receipt.id !== "string" ||
-      receipt.language !== job.language ||
-      receipt.environment !== job.environment ||
-      (job.environment === "react" &&
-        (receipt.specHash !== specHash || receipt.codeHash !== codeHash)) ||
       typeof receipt.executed !== "boolean" ||
-      ![
-        "completed",
-        "timeout",
-        "output-limit",
-        "resource-limit",
-        "unavailable",
-      ].includes(receipt.status) ||
-      (receipt.executed &&
-        (receipt.codeHash !== codeHash ||
-          !/^sha256:[a-f0-9]{64}$/.test(receipt.imageId ?? "") ||
-          typeof receipt.stdout !== "string" ||
-          typeof receipt.stderr !== "string"))
+      !EXECUTION_STATUSES.includes(receipt.status) ||
+      (receipt.executed
+        ? !executedReceiptMatches(receipt, job, codeHash, specHash)
+        : receipt.language !== job.language ||
+          receipt.environment !== job.environment ||
+          (job.environment === "react" &&
+            (receipt.specHash !== specHash || receipt.codeHash !== codeHash)))
     )
       throw Error("Runner receipt does not match the captured code");
     if (preview !== undefined) {

@@ -51,6 +51,9 @@ export const reviewSignature = (record: ReviewRecord | undefined) =>
   );
 export const scopeKey = (id: string, depth: number) =>
   `${id}/${isFinalTarget(id) ? "T4" : `D${depth}`}`;
+/** The track an objective or requirement id belongs to. */
+export const trackOf = (id: string): Track =>
+  id.startsWith("PY:") ? "PY" : "PE";
 export function learningProgress(
   l: LearnerLedger,
   id: string,

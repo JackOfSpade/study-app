@@ -2,6 +2,7 @@ import { historicalScope } from "./historical-scope";
 import { importedProofValid } from "./imported-proof";
 import {
   facetMappingShapeValid,
+  trackOf,
   type FacetProof,
   type HistoricalFacetMapping,
   type LearnerLedger,
@@ -15,21 +16,22 @@ export function historicalRecords(
   objectiveId: string,
   depth: number,
 ) {
-  const track = objectiveId.startsWith("PY:") ? "PY" : "PE";
-  return historicalScope(r, track, objectiveId, depth).evidenceRows.map(
-    (row) => {
-      const c = row.split(CELL_SEPARATOR).map((s) => s.trim());
-      return {
-        id: c[1],
-        date: c[3],
-        mode: c[6],
-        assistance: c[7],
-        score: c[8],
-        observation: c[9],
-        row,
-      };
-    },
-  );
+  return historicalScope(
+    r,
+    trackOf(objectiveId),
+    objectiveId,
+    depth,
+  ).evidenceRows.map((row) => {
+    const c = row.split(CELL_SEPARATOR).map((s) => s.trim());
+    return {
+      id: c[1],
+      date: c[3],
+      mode: c[6],
+      assistance: c[7],
+      score: c[8],
+      observation: c[9],
+    };
+  });
 }
 
 /** Structural source checks complement the trusted assessor's semantic mapping.
@@ -40,8 +42,7 @@ export function validateHistoricalMapping(
   m: HistoricalFacetMapping,
 ) {
   const def = l.scopes[m.scopeId];
-  const track = def?.objectiveId.startsWith("PY:") ? "PY" : "PE";
-  const objective = r.tracks[track].objectives.find(
+  const objective = r.tracks[trackOf(def?.objectiveId ?? "")].objectives.find(
     (o) => o.id === def?.objectiveId,
   );
   if (
@@ -105,10 +106,7 @@ export function validateHistoricalMapping(
         "A successful source observation cannot be relabeled as a historical failure",
       );
   }
-  return {
-    def,
-    records: records.filter((row) => m.evidenceIds.includes(row.id)),
-  };
+  return { def };
 }
 
 export function historicalProofValid(
@@ -204,4 +202,30 @@ export function independentProofValid(
   ref: string,
 ) {
   return facetProofValid(r, l, objectiveId, depth, facet, ref, "independent");
+}
+
+/** Whether a verified scope has at least one facet and every facet is backed
+ * by a currently valid independent proof. Callers check the scope's identity
+ * (objective, depth, source scope) against what they expect. */
+export function scopeIndependentlyProven(
+  r: Roadmap,
+  l: LearnerLedger,
+  scopeId: string,
+  facets: Record<string, FacetProof>,
+) {
+  const def = l.scopes[scopeId];
+  return (
+    !!def &&
+    def.facets.length > 0 &&
+    l.verifiedScopes.includes(scopeId) &&
+    def.facets.every((f) => {
+      const proof = facets[`D${def.depth}:${f.id}`];
+      return (
+        proof?.outcome === "independent" &&
+        proof.evidenceIds.some((ref) =>
+          independentProofValid(r, l, def.objectiveId, def.depth, f.id, ref),
+        )
+      );
+    })
+  );
 }

@@ -1,11 +1,10 @@
 import { environmentStatus } from "./environment-status";
-import { independentProofValid } from "./historical-proof";
+import { scopeIndependentlyProven } from "./historical-proof";
 import { importedEnvironmentEvidence } from "./imported-proof";
-import type { CellState, LearnerLedger } from "./learning-model";
-import { scopeKey } from "./learning-model";
+import { scopeKey, type CellState, type LearnerLedger } from "./learning-model";
 import type { Roadmap, Track } from "./model";
 import { baselineCheckpointValid } from "./observation-validity";
-import { CELL_SEPARATOR } from "./table-row";
+import { tableCells } from "./table-row";
 
 export interface FinalRequirement {
   id: string;
@@ -30,12 +29,7 @@ function rows(text: string, pattern: RegExp) {
   return text
     .split("\n")
     .filter((line) => pattern.test(line))
-    .map((line) =>
-      line
-        .split(CELL_SEPARATOR)
-        .slice(1, -1)
-        .map((cell) => cell.trim()),
-    );
+    .map(tableCells);
 }
 function state(value: string): CellState {
   if (!["U", "G", "P", "R", "—"].includes(value))
@@ -43,11 +37,33 @@ function state(value: string): CellState {
   return value as CellState;
 }
 
-/** Definitions and imported statuses only. This function never awards evidence. */
+// Roadmaps are never changed after parsing, so each track is read once.
+type TrackSource = Roadmap["tracks"][Track];
+const definitionCache = new WeakMap<
+  TrackSource,
+  {
+    inputs: unknown[];
+    definitions: FinalRequirement[];
+  }
+>();
+
+/** Definitions and imported statuses only. This function never awards evidence.
+ * Callers get their own copies; the cached definitions are never handed out. */
 export function finalRequirements(
   r: Roadmap,
   track: Track,
 ): FinalRequirement[] {
+  const t = r.tracks[track],
+    inputs = [t.progress, t.curriculum, t.objectives, t.topics];
+  let cached = definitionCache.get(t);
+  if (!cached || cached.inputs.some((v, i) => v !== inputs[i])) {
+    cached = { inputs, definitions: readFinalRequirements(r, track) };
+    definitionCache.set(t, cached);
+  }
+  return cached.definitions.map((d) => ({ ...d }));
+}
+
+function readFinalRequirements(r: Roadmap, track: Track): FinalRequirement[] {
   const { progress, curriculum, objectives } = r.tracks[track];
   const definitions: FinalRequirement[] = [];
   for (const c of rows(
@@ -182,17 +198,7 @@ export function finalRequirementStatus(
     def.objectiveId === d.id &&
     def.id === key &&
     def.depth === 4 &&
-    def.facets.length > 0 &&
-    l.verifiedScopes.includes(key) &&
-    def.facets.every((f) => {
-      const proof = p.facets[`D4:${f.id}`];
-      return (
-        proof?.outcome === "independent" &&
-        proof.evidenceIds.some((ref) =>
-          independentProofValid(r, l, d.id, 4, f.id, ref),
-        )
-      );
-    })
+    scopeIndependentlyProven(r, l, key, p.facets)
     ? "P"
     : "U";
 }
@@ -217,17 +223,7 @@ function supportedCheckpoint(
     def.depth === depth &&
     def.objectiveId === id &&
     def.sourceScope === o.scope &&
-    def.facets.length > 0 &&
-    l.verifiedScopes.includes(key) &&
-    def.facets.every((f) => {
-      const proof = cell.facets[`D${depth}:${f.id}`];
-      return (
-        proof?.outcome === "independent" &&
-        proof.evidenceIds.some((ref) =>
-          independentProofValid(r, l, id, depth, f.id, ref),
-        )
-      );
-    })
+    scopeIndependentlyProven(r, l, key, cell.facets)
   );
 }
 

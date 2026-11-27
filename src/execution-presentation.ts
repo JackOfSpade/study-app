@@ -1,13 +1,20 @@
 import { isRecord } from "./records";
 import type { WorkspaceExecution } from "./execution";
 
+/** stdout then stderr, with a line break between them when stdout lacks one. */
+function joinOutput(stdout?: string, stderr?: string) {
+  const out = stdout ?? "",
+    err = stderr ?? "";
+  return `${out}${out && err && !out.endsWith("\n") ? "\n" : ""}${err}`;
+}
+
 /** Display recorded observations only; never turn exit zero into a correctness claim. */
 export function executionText(job: WorkspaceExecution) {
   const receipt = job.receipt,
     heading = `${job.author ?? "human"} · v${job.revision} · ${job.environment === "react" ? "React browser" : job.language} · ${job.status}${receipt ? ` / ${receipt.status} / exit ${receipt.exitCode ?? "—"}` : ""}`,
     detail = job.error ?? receipt?.detail ?? "";
   if (job.environment !== "react" || !receipt?.stdout)
-    return `${heading}\n${detail}\n${receipt?.stdout ?? ""}${receipt?.stderr ?? ""}`;
+    return `${heading}\n${detail}\n${joinOutput(receipt?.stdout, receipt?.stderr)}`;
   try {
     const observed: unknown = JSON.parse(receipt.stdout);
     if (
@@ -89,6 +96,6 @@ export function executionText(job: WorkspaceExecution) {
     if (receipt.stderr) lines.push(receipt.stderr);
     return lines.filter(Boolean).join("\n");
   } catch {
-    return `${heading}\n${detail}\nSaved runner output:\n${receipt.stdout}${receipt.stderr ?? ""}`;
+    return `${heading}\n${detail}\nSaved runner output:\n${joinOutput(receipt.stdout, receipt.stderr)}`;
   }
 }

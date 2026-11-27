@@ -44,7 +44,7 @@ TypeScript, a semantic DOM and Vite build the local browser app (`src/`, entry `
 
 **Execution**
 
-- `execution.ts`: eligibility (live profile, a runtime on the question, depth 2 or above and a match with the scheduled scope) and `POST /api/execute`. Receipts carry the code, revision, hashes, image ID and output; they are observations, not correctness.
+- `execution.ts`: saved run receipts and the runner client. No UI starts a run at present: `runWorkspace` (eligibility is the live profile, a runtime on the question, depth 2 or above and a match with the scheduled scope; then `POST /api/execute`) is driven by the runner test suites. Saved receipts are still displayed, still evidence and still ENV observation sources. Receipts carry the code, revision, hashes, image ID and output; they are observations, not correctness.
 
 **Persistence**
 
