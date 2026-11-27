@@ -2,8 +2,8 @@ import { sha256 } from "./digest";
 import { verifyEnvironmentPayload } from "./environment-review";
 import { validateEnvironmentEvidence } from "./environment-status";
 import {
+  facetsIndependentlyProven,
   historicalReviewAuthorized,
-  independentProofValid,
   validateHistoricalMapping,
 } from "./historical-proof";
 import {
@@ -18,13 +18,16 @@ import {
 } from "./learner";
 import { roleFocused } from "./career-profile";
 import {
+  attemptClosed,
   isFinalTarget,
   learningAttemptRoot,
   learningProgress,
   progressStatus,
+  ratioTrack,
   scopeKey,
   servedLearningAttempts,
   studyRatioPosition,
+  trackOf,
   type LearnerLedger,
   type ScopeDefinition,
 } from "./learning-model";
@@ -304,11 +307,7 @@ function sessionNeedsProjection(l: LearnerLedger, id: string) {
 function pendingText(l: LearnerLedger, t?: Track) {
   return (
     l.attempts
-      .filter(
-        (a) =>
-          !["served", "externally-resolved"].includes(a.status) &&
-          (!t || a.contract.track === t),
-      )
+      .filter((a) => !attemptClosed(a) && (!t || a.contract.track === t))
       .map(
         (a) =>
           `${a.id} ${a.status}: ${a.contract.objectiveIds.join(", ")} D${a.contract.depth}; original encounter ${a.encounter}; ${a.parentAttempt ? `continues ${a.parentAttempt}` : "no task transfer"}`,
@@ -391,22 +390,14 @@ function validate(r: Roadmap, l: LearnerLedger) {
             !def ||
             !l.verifiedScopes.includes(key) ||
             !def.facets.length ||
-            !def.facets.every((f) => {
-              const p = c.facets[`D${d}:${f.id}`];
-              return (
-                p?.outcome === "independent" &&
-                p.evidenceIds.some((ref) =>
-                  independentProofValid(r, l, o.id, d, f.id, ref),
-                )
-              );
-            })
+            !facetsIndependentlyProven(r, l, o.id, d, def.facets, c.facets)
           )
             throw Error(`Unsupported new checkpoint pass ${key}`);
         }
       }
     }
   for (const [id, p] of Object.entries(l.finalProgress ?? {})) {
-    const track = id.startsWith("PY:") ? "PY" : "PE";
+    const track = trackOf(id);
     const d = finalRequirements(r, track).find(
       (d) => d.id === id && d.selected && d.kind !== "environment",
     );
@@ -421,11 +412,7 @@ function validate(r: Roadmap, l: LearnerLedger) {
       throw Error(`Unsupported final requirement pass ${id}`);
   }
   for (const d of Object.values(l.scopes)) {
-    const o = learningTarget(
-      r,
-      d.objectiveId.startsWith("PY:") ? "PY" : "PE",
-      d.objectiveId,
-    );
+    const o = learningTarget(r, trackOf(d.objectiveId), d.objectiveId);
     if (
       !o ||
       d.sourceScope !== o.scope ||
@@ -516,8 +503,8 @@ export function sourceLedgerProjection(r: Roadmap, ledger: LearnerLedger) {
     reconcileGates(r, l);
   }
   delete l.careerFocus;
-  delete (l as LearnerLedger & { careerCarryover?: unknown }).careerCarryover;
-  delete (l as LearnerLedger & { careerFullTrack?: unknown }).careerFullTrack;
+  delete l.careerCarryover;
+  delete l.careerFullTrack;
   return l;
 }
 /** Pass the source to project an active ledger. The export path already holds
@@ -1568,7 +1555,7 @@ export async function prepareRoadmapExport(
       "Track served by the last primary visit":
         recentServed.at(-1)?.contract.track ??
         savedField(shared, "Track served by the last primary visit"),
-      "Next track in alternation": `${(["PY", "PE", "PE"] as const)[studyRatioPosition(l)]}; pattern position ${studyRatioPosition(l)}; ${l.cycle} app-recorded served visit(s) since source revision ${r.revision}; imported source visits remain in their original history; unfinished visit and gate exceptions take precedence`,
+      "Next track in alternation": `${ratioTrack(l)}; pattern position ${studyRatioPosition(l)}; ${l.cycle} app-recorded served visit(s) since source revision ${r.revision}; imported source visits remain in their original history; unfinished visit and gate exceptions take precedence`,
       "Planned continuation order": next,
       "Tier-lead status": `PY cleared through ${l.tracks.PY.cleared}; PE cleared through ${l.tracks.PE.cleared}. A track may not start a tier more than one above the other track's current tier; independent gate evidence required.`,
       "Next action in this conversation": next,

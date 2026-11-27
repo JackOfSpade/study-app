@@ -204,6 +204,28 @@ export function independentProofValid(
   return facetProofValid(r, l, objectiveId, depth, facet, ref, "independent");
 }
 
+/** Whether every listed facet of objectiveId at depth has an independent
+ * outcome backed by a currently valid independent proof. An empty list is
+ * vacuously proven; callers that need a facet check the length themselves. */
+export function facetsIndependentlyProven(
+  r: Roadmap,
+  l: LearnerLedger,
+  objectiveId: string,
+  depth: number,
+  scopeFacets: readonly { id: string }[],
+  facets: Record<string, FacetProof>,
+) {
+  return scopeFacets.every((f) => {
+    const proof = facets[`D${depth}:${f.id}`];
+    return (
+      proof?.outcome === "independent" &&
+      proof.evidenceIds.some((ref) =>
+        independentProofValid(r, l, objectiveId, depth, f.id, ref),
+      )
+    );
+  });
+}
+
 /** Whether a verified scope has at least one facet and every facet is backed
  * by a currently valid independent proof. Callers check the scope's identity
  * (objective, depth, source scope) against what they expect. */
@@ -218,14 +240,13 @@ export function scopeIndependentlyProven(
     !!def &&
     def.facets.length > 0 &&
     l.verifiedScopes.includes(scopeId) &&
-    def.facets.every((f) => {
-      const proof = facets[`D${def.depth}:${f.id}`];
-      return (
-        proof?.outcome === "independent" &&
-        proof.evidenceIds.some((ref) =>
-          independentProofValid(r, l, def.objectiveId, def.depth, f.id, ref),
-        )
-      );
-    })
+    facetsIndependentlyProven(
+      r,
+      l,
+      def.objectiveId,
+      def.depth,
+      def.facets,
+      facets,
+    )
   );
 }

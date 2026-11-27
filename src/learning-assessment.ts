@@ -2,6 +2,7 @@ import { isProvider } from "./model";
 import { bridgeRequest, isInterruption, status } from "./bridge-client";
 import { evidencePacket, syncLearningView } from "./curriculum";
 import { applyLearningAssessment, encounterKey } from "./learner";
+import { isHumanWork } from "./learning-model";
 import type {
   Assessment,
   Encounter,
@@ -98,8 +99,7 @@ async function runAssessment(
       external &&
       !e.history.some(
         (h) =>
-          h.author === "human" &&
-          ["edit", "reasoning", "test", "execution"].includes(h.kind) &&
+          isHumanWork(h) &&
           !external.externalResolution!.assessedHumanSequences.includes(
             h.seq,
           ) &&

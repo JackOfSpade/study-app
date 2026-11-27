@@ -5,13 +5,14 @@ import {
 } from "../scripts/lib/topic-assessment.mjs";
 import { isRecord } from "./records";
 import type { ScopeDefinition } from "./learning-model";
-import type {
-  Contract,
-  Encounter,
-  StudyRecord,
-  Roadmap,
-  StudyState,
-  Track,
+import {
+  allEncounters,
+  type Contract,
+  type Encounter,
+  type StudyRecord,
+  type Roadmap,
+  type StudyState,
+  type Track,
 } from "./model";
 import { inspectMergedDocument } from "./roadmap-structure";
 import { studyTrackProgress } from "./study-progress";
@@ -342,7 +343,7 @@ export function topicAssessmentContext(
     });
   });
   const encounters = new Map<string, Encounter>();
-  for (const e of [...Object.values(g.encounters), ...g.study.archives]) {
+  for (const e of allEncounters(g)) {
     const key = runEncounterKey(g, e);
     if (!encounters.has(key)) encounters.set(key, e);
   }

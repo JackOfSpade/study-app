@@ -7,6 +7,7 @@ import {
   learningTarget,
 } from "./final-requirements";
 import {
+  facetsIndependentlyProven,
   historicalRecords,
   independentProofValid,
   validateHistoricalMapping,
@@ -1210,19 +1211,13 @@ export function applyLearningAssessment(
       was = progressStatus(cell, def.depth);
     const complete =
       work.verifiedScopes.includes(id) &&
-      def.facets.every(
-        (f) =>
-          cell.facets[`D${def.depth}:${f.id}`]?.outcome === "independent" &&
-          cell.facets[`D${def.depth}:${f.id}`].evidenceIds.some((ref) =>
-            independentProofValid(
-              r,
-              work,
-              def.objectiveId,
-              def.depth,
-              f.id,
-              ref,
-            ),
-          ),
+      facetsIndependentlyProven(
+        r,
+        work,
+        def.objectiveId,
+        def.depth,
+        def.facets,
+        cell.facets,
       );
     if (complete) {
       setProgressStatus(cell, def.depth, "P");

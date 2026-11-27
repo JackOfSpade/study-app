@@ -2,7 +2,7 @@ import { displayScale } from "./display-scale";
 import { createCheckpointQueue } from "./checkpoint-queue";
 import { openEnvelope, sealEnvelope } from "./hash";
 import { reconcileKnowledgeGaps } from "./knowledge-probe";
-import { type StudyRecord } from "./model";
+import { allEncounters, type StudyRecord } from "./model";
 import { isRecord } from "./records";
 import { RESTARTED_ASSESSMENT, RESTARTED_TUTOR } from "./resume-work";
 import {
@@ -343,10 +343,7 @@ export function recover(g: StudyRecord) {
     g.study.pending.encounter = `${g.id}/${g.study.pending.encounter}`;
   for (const e of Object.values(g.encounters)) e.runId ??= g.id;
   const archived = new Set(g.study.archives);
-  for (const e of new Set([
-    ...Object.values(g.encounters),
-    ...g.study.archives,
-  ])) {
+  for (const e of new Set(allEncounters(g))) {
     e.chatOpen = false;
     // resume-work.ts resends a request carrying exactly this note.
     interruptPending(e.tutorRequests, RESTARTED_TUTOR);

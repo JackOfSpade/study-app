@@ -8,7 +8,12 @@ import {
 } from "./environment-status";
 import { finalRequirements } from "./final-requirements";
 import { encounterKey } from "./learner";
-import type { Provider, StudyRecord, Roadmap } from "./model";
+import {
+  allEncounters,
+  type Provider,
+  type StudyRecord,
+  type Roadmap,
+} from "./model";
 
 export interface EnvironmentReviewJob {
   id: string;
@@ -84,7 +89,7 @@ export function reviewEnvironment(
   if (!job) {
     const id = `environment-review-${crypto.randomUUID()}`,
       e = o.execution
-        ? [...Object.values(g.encounters), ...study.archives].find(
+        ? allEncounters(g).find(
             (e) => encounterKey(e) === o.execution!.encounter,
           )
         : undefined;

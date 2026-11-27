@@ -206,6 +206,9 @@ export function learningAttemptRoot(
   return attempt.id;
 }
 
+/** A served or externally resolved attempt: no longer active work. */
+export const attemptClosed = (a: Pick<LearningAttempt, "status">) =>
+  a.status === "served" || a.status === "externally-resolved";
 export function servedLearningAttempts(l: LearnerLedger) {
   const seen = new Set<string>();
   return l.attempts
@@ -229,6 +232,10 @@ export const studyRatioPosition = (s: {
 export const STUDY_RATIO = ["PY", "PE", "PE"] as const;
 export const ratioTrack = (s: Parameters<typeof studyRatioPosition>[0]) =>
   STUDY_RATIO[studyRatioPosition(s)];
+/** Human edits, reasoning, tests and executions: the learner's own work. */
+export const isHumanWork = (h: { author: string; kind: string }) =>
+  h.author === "human" &&
+  ["edit", "reasoning", "test", "execution"].includes(h.kind);
 /** History kinds that count as human-authored technical work. */
 export const HUMAN_TECHNICAL_KINDS: readonly string[] = [
   "edit",

@@ -1,6 +1,7 @@
 import { escapeHtml as escape } from "./html";
 import type { Provider, StudyRecord, Roadmap } from "./model";
 import { download } from "./dom";
+import { trackOf } from "./learning-model";
 import { adoptReconciledRoadmap } from "./roadmap-adoption";
 import type {
   RoadmapReconciliation,
@@ -41,7 +42,7 @@ function baselineReview(p: RoadmapReconciliation, r: Roadmap) {
       typeof d.objectiveId === "string" &&
       Number.isInteger(d.depth) &&
       p.completeScopes.includes(d.id) &&
-      r.tracks[d.objectiveId.startsWith("PY:") ? "PY" : "PE"].objectives.some(
+      r.tracks[trackOf(d.objectiveId)].objectives.some(
         (o) => o.id === d.objectiveId && o.cells[d.depth - 1] === "P",
       ),
   );

@@ -1,5 +1,6 @@
 import { sha256 } from "./digest";
 import { finalRequirements } from "./final-requirements";
+import { STUDY_RATIO } from "./learning-model";
 import type { Objective, Roadmap, Track } from "./model";
 import { readIdentifierCounters } from "./roadmap-identifiers";
 import { supplementHeadingIn } from "./roadmap-export-names";
@@ -348,9 +349,7 @@ export async function parseRoadmapDocument(
     issues.push(
       "Saved next PE turn does not distinguish the first and second PE visits; reconcile actual primary visits before resuming the ratio.",
     );
-  else if (
-    (["PY", "PE", "PE"] as const)[position] !== /^(PY|PE)\b/.exec(next)?.[1]
-  )
+  else if (STUDY_RATIO[position] !== /^(PY|PE)\b/.exec(next)?.[1])
     throw Error("Saved ratio position contradicts its next track");
   const reviews: NonNullable<Roadmap["resume"]>["reviews"] = {};
   for (const t of ["PY", "PE"] as Track[]) {

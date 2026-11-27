@@ -384,3 +384,9 @@ export interface StudyRecord {
 export function nextSeq(g: Pick<StudyRecord, "seq">) {
   return ++g.seq;
 }
+/** Every saved question: current encounters first, then archived ones, in
+ * stored order. Not deduplicated; callers that may see one object in both
+ * places wrap it in a Set. */
+export const allEncounters = (
+  g: Pick<StudyRecord, "encounters"> & { study: Pick<StudyState, "archives"> },
+): Encounter[] => [...Object.values(g.encounters), ...g.study.archives];

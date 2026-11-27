@@ -5,7 +5,13 @@
  * explicit retry button and is never resent without the learner.
  */
 import { encounterKey } from "./learner";
-import type { Assessment, Encounter, StudyRecord, TutorRequest } from "./model";
+import {
+  allEncounters,
+  type Assessment,
+  type Encounter,
+  type StudyRecord,
+  type TutorRequest,
+} from "./model";
 
 /** What loading writes on a tutor request the page closed on (persistence.ts
  * `recover`). Earlier builds resent such a request once and then marked it
@@ -27,7 +33,7 @@ const CUT_OFF_ASSESSMENT =
  * each one reviews. */
 export function resumableAssessments(g: StudyRecord) {
   if (g.study.profile !== "live") return [];
-  const questions = [...Object.values(g.encounters), ...g.study.archives];
+  const questions = allEncounters(g);
   const found: { assessment: Assessment; encounter: Encounter }[] = [];
   for (const a of g.study.assessments) {
     if (

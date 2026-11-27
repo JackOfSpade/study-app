@@ -20,6 +20,7 @@ import { mountBugReport } from "./bug-report";
 import {
   activateCareerFocus,
   careerProfileSummary,
+  savedCareerFocus,
   type CareerFocus,
 } from "./career-profile";
 import { connectionSteps } from "./connection-steps";
@@ -44,7 +45,12 @@ import { createLessonSurface, type LessonSurface } from "./lesson-surface";
 import { lessonStore } from "./lesson-store";
 import { moveToLiveStudy } from "./live-study";
 import { nextPartReady, openPart, questionHtml } from "./question-parts";
-import type { Encounter, StudyRecord, Roadmap } from "./model";
+import {
+  allEncounters,
+  type Encounter,
+  type StudyRecord,
+  type Roadmap,
+} from "./model";
 import {
   decode,
   encode,
@@ -118,11 +124,7 @@ function newSave() {
 }
 /** Apply the saved role profile, or the default one, to a study state. */
 function applyCareerFocus(study: StudyRecord["study"]) {
-  activateCareerFocus(
-    roadmap,
-    study,
-    study.careerFocus ?? study.learner?.careerFocus ?? "product-feature-owner",
-  );
+  activateCareerFocus(roadmap, study, savedCareerFocus(study));
 }
 moveToLiveStudy(studyRecord, roadmap);
 applyCareerFocus(studyRecord.study);
@@ -737,10 +739,7 @@ function openStudyTerminal(e: Encounter) {
 }
 /** The question that recorded a gap, if it is still saved. */
 const gapSource = (gap: KnowledgeGapRecord) =>
-  [
-    ...Object.values(studyRecord.encounters),
-    ...studyRecord.study.archives,
-  ].find((x) => encounterKey(x) === gap.encounter);
+  allEncounters(studyRecord).find((x) => encounterKey(x) === gap.encounter);
 /** Why "Test me on this" cannot work now, or nothing when it can. */
 function canTestGap(gap: KnowledgeGapRecord): string | undefined {
   if (status().mode !== "claude-cli")

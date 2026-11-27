@@ -1,11 +1,10 @@
-import { addDays, isDelayedReview, localDate } from "./learner";
+import { advanceReview, isDelayedReview } from "./learner";
 import {
   reviewSignature,
   scopeKey,
   trackOf,
   type LearnerLedger,
   type RetentionEvent,
-  type ReviewRecord,
 } from "./learning-model";
 import type { Roadmap } from "./model";
 import { observationInvalidated } from "./observation-validity";
@@ -13,23 +12,6 @@ import type { RoadmapReconciliation } from "./roadmap-adoption-types";
 
 export const retentionEventText = (event: RetentionEvent) =>
   `<!-- RETENTION_EVENT ${encodeURIComponent(JSON.stringify(event))} -->`;
-function advance(
-  previous: ReviewRecord,
-  session: string,
-  observedAt: string,
-): ReviewRecord {
-  const stage = Math.min(2, previous.stage + 1);
-  const next = {
-    ...previous,
-    stage,
-    verifiedReviews: previous.verifiedReviews + 1,
-    lastIndependentAt: observedAt,
-    sequence: session,
-    due: addDays(localDate(observedAt), [3, 7, 21][stage]),
-  };
-  delete next.lastIndependentDate;
-  return next;
-}
 /** Replay only locally retained, receipt-backed full-scope delayed reviews.
  * Uploaded audit comments never become qualified events automatically. */
 export function replayRetention(r: Roadmap, l: LearnerLedger, scopeId: string) {
@@ -88,8 +70,9 @@ export function replayRetention(r: Roadmap, l: LearnerLedger, scopeId: string) {
       !isDelayedReview(event.before, event.at, attempt.session) ||
       // Every evidence item has an observedAt (checked above), so this is set.
       !observedAt ||
-      reviewSignature(advance(event.before, attempt.session, observedAt)) !==
-        reviewSignature(event.after)
+      reviewSignature(
+        advanceReview(event.before, attempt.session, observedAt),
+      ) !== reviewSignature(event.after)
     )
       throw Error(
         "Retention history failed its exact assessment, scope or transaction validation",
@@ -109,7 +92,7 @@ export function replayRetention(r: Roadmap, l: LearnerLedger, scopeId: string) {
           isDelayedReview(result, e.observedAt, attempt.session),
       )
     )
-      result = advance(result, attempt.session, observedAt);
+      result = advanceReview(result, attempt.session, observedAt);
   }
   return result;
 }

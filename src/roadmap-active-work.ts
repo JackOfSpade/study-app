@@ -1,6 +1,11 @@
-import { isProvider } from "./model";
+import { allEncounters, isProvider } from "./model";
 import { sha256 } from "./digest";
-import type { LearnerLedger, LearningAttempt } from "./learning-model";
+import {
+  attemptClosed,
+  isHumanWork,
+  type LearnerLedger,
+  type LearningAttempt,
+} from "./learning-model";
 import type { Encounter, StudyRecord } from "./model";
 import type {
   ActiveAttemptSnapshot,
@@ -10,13 +15,7 @@ import { receiptRows } from "./roadmap-structure";
 import { tableCells } from "./table-row";
 const key = (e: Encounter) => `${e.runId ?? "legacy"}/${e.id}`;
 const encounter = (g: StudyRecord, id: string) =>
-  [...Object.values(g.encounters), ...g.study.archives].find(
-    (e) => key(e) === id,
-  );
-/** Human edits, reasoning, tests and executions: the learner's own work. */
-export const isHumanWork = (h: { author: string; kind: string }) =>
-  h.author === "human" &&
-  ["edit", "reasoning", "test", "execution"].includes(h.kind);
+  allEncounters(g).find((e) => key(e) === id);
 // Legacy clock time, collaborator notes and roadmap presentation do not change
 // the captured human task. Actual edits, reasoning and tutoring do.
 const workText = (e: Encounter) =>
@@ -43,7 +42,7 @@ export async function captureActiveAttempts(
 ): Promise<ActiveAttemptSnapshot[]> {
   const result: ActiveAttemptSnapshot[] = [];
   for (const a of g.study.learner?.attempts ?? []) {
-    if (["served", "externally-resolved"].includes(a.status)) continue;
+    if (attemptClosed(a)) continue;
     const e = encounter(g, a.encounter);
     if (e?.problem)
       result.push({

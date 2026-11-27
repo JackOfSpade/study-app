@@ -65,6 +65,7 @@ import {
   type Problem,
   type Roadmap,
   type Submission,
+  allEncounters,
   nextSeq,
   isProvider,
 } from "./model";
@@ -254,7 +255,7 @@ export function earlierQuestions(
   current: Encounter,
 ) {
   const ids = new Set(contract.objectiveIds);
-  const issued = [...Object.values(g.encounters), ...g.study.archives]
+  const issued = allEncounters(g)
     .filter(
       (x) =>
         x !== current &&
@@ -313,7 +314,7 @@ export function watchStreamingReplies(listener: () => void) {
  * and the learner's own work stay. */
 export function releaseRetiredChatRequests(g: StudyRecord) {
   if (status().mode !== "claude-cli") return;
-  for (const e of [...Object.values(g.encounters), ...g.study.archives]) {
+  for (const e of allEncounters(g)) {
     if (e.pendingGeneration && e.pendingGeneration.provider !== "claude-cli")
       delete e.pendingGeneration;
     const session = e.directStudy;
@@ -455,7 +456,7 @@ export function seedGapPractice(
 ) {
   if (!live(g) || status().mode !== "claude-cli")
     throw Error("Claude is not connected. Your work is saved.");
-  const source = [...Object.values(g.encounters), ...g.study.archives].find(
+  const source = allEncounters(g).find(
     (x) => encounterKey(x) === gap.encounter,
   );
   const issued = source?.problem?.contract;

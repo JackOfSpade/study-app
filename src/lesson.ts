@@ -30,7 +30,7 @@ import {
   type LessonStore,
 } from "./lesson-store";
 import type { LessonGap, LessonMessage } from "./lesson-types";
-import type { Roadmap, StudyRecord } from "./model";
+import { allEncounters, type Roadmap, type StudyRecord } from "./model";
 import { isRecord } from "./records";
 
 const SAVE_DELAY_MS = 400;
@@ -133,7 +133,7 @@ export function lessonPayload(
   const scope = gap.objectiveIds.length
     ? g.study.learner?.scopes?.[scopeKey(gap.objectiveIds[0], gap.depth)]
     : undefined;
-  const source = [...Object.values(g.encounters), ...g.study.archives].find(
+  const source = allEncounters(g).find(
     (e) =>
       e.problem &&
       (encounterKey(e) === gap.encounter ||

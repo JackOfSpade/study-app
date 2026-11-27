@@ -6,7 +6,12 @@ import {
 } from "./execution";
 import { finalRequirements } from "./final-requirements";
 import { encounterKey } from "./learner";
-import type { Artifact, StudyRecord, Roadmap } from "./model";
+import {
+  allEncounters,
+  type Artifact,
+  type StudyRecord,
+  type Roadmap,
+} from "./model";
 import { sha256 } from "./digest";
 import { workspaceAt } from "./workspace-history";
 export interface EnvironmentObservation {
@@ -79,7 +84,7 @@ interface EnvironmentObservationInput {
   suppliedOutput?: { name: string; text: string };
 }
 export function environmentExecutions(g: StudyRecord) {
-  return [...Object.values(g.encounters), ...g.study.archives].flatMap((e) =>
+  return allEncounters(g).flatMap((e) =>
     (e.executions ?? [])
       .filter(
         (job) =>

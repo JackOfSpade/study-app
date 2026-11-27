@@ -1,13 +1,13 @@
 import { studyMapHtml } from "./study-map";
 import { eligible, syncLearningView } from "./curriculum";
 import { encounterKey, interruptLearningAttempt } from "./learner";
-import type { Assessment, Encounter, StudyRecord, Roadmap } from "./model";
-
-/** Every saved question, open or archived. */
-const savedQuestions = (g: StudyRecord) => [
-  ...Object.values(g.encounters),
-  ...g.study.archives,
-];
+import {
+  allEncounters,
+  type Assessment,
+  type Encounter,
+  type StudyRecord,
+  type Roadmap,
+} from "./model";
 
 export function enterStudyWorkspace(g: StudyRecord) {
   if (!g.studyWorkspace?.enabled)
@@ -73,7 +73,7 @@ export function nextWorkspaceQuestion(
         .map((a) => a.encounter),
     );
     let interrupted = false;
-    for (const e of savedQuestions(g))
+    for (const e of allEncounters(g))
       if (
         unfinished.has(encounterKey(e)) &&
         e.state === "consumed" &&
@@ -160,7 +160,7 @@ function assessesQuestion(
   if (a.id.startsWith(`assessment-${encounterKey(e)}-`)) return true;
   return (
     !a.id.startsWith("assessment-") &&
-    savedQuestions(g).every(
+    allEncounters(g).every(
       (other) => other.id !== e.id || encounterKey(other) === encounterKey(e),
     )
   );
@@ -178,11 +178,11 @@ export function questionForAssessment(
   g: StudyRecord,
   a: Assessment,
 ): Encounter | undefined {
-  return savedQuestions(g).find((e) => assessesQuestion(g, a, e));
+  return allEncounters(g).find((e) => assessesQuestion(g, a, e));
 }
 
 export function workspaceSelectedQuestion(g: StudyRecord) {
-  return savedQuestions(g).find(
+  return allEncounters(g).find(
     (e) => encounterKey(e) === g.studyWorkspace?.encounter,
   );
 }

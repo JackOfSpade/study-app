@@ -1,4 +1,4 @@
-import { isProvider } from "./model";
+import { allEncounters, isProvider } from "./model";
 import {
   preserveLaterBaselineEvidence,
   reviewBaselineCorrections,
@@ -11,15 +11,25 @@ import {
   finalRequirementStatus,
   learningTarget,
 } from "./final-requirements";
-import { facetProofValid, independentProofValid } from "./historical-proof";
+import {
+  facetProofValid,
+  facetsIndependentlyProven,
+  independentProofValid,
+} from "./historical-proof";
 import { importedMappingValid } from "./imported-proof";
-import { reconcileAttemptGates, reconcileGates } from "./learner";
+import { reconcileAttemptGates, settleGates } from "./learner";
 import type {
   CellState,
   LearnerLedger,
   ScopeDefinition,
 } from "./learning-model";
-import { learningProgress, scopeFacetsValid, scopeKey } from "./learning-model";
+import {
+  attemptClosed,
+  learningProgress,
+  scopeFacetsValid,
+  scopeKey,
+  trackOf,
+} from "./learning-model";
 import type { Provider, StudyRecord, Roadmap, Track } from "./model";
 import {
   baselineCheckpointValid,
@@ -86,7 +96,7 @@ const EVIDENCE_REGISTER = "/0.5 Assessment evidence register/";
 const snapshot = (l: LearnerLedger) => JSON.stringify(l);
 export function roadmapAdoptionBusy(g: StudyRecord) {
   return (
-    [...Object.values(g.encounters), ...g.study.archives].some(
+    allEncounters(g).some(
       (e) =>
         e.generation ||
         e.submissions.some((s) => s.status === "pending") ||
@@ -98,7 +108,7 @@ export function roadmapAdoptionBusy(g: StudyRecord) {
   );
 }
 function validDefinition(r: Roadmap, l: LearnerLedger, d: ScopeDefinition) {
-  const t = d.objectiveId.startsWith("PY:") ? "PY" : "PE",
+  const t = trackOf(d.objectiveId),
     o = learningTarget(r, t, d.objectiveId);
   if (
     !o ||
@@ -203,7 +213,7 @@ export async function compileRoadmapAdoption(
       update.correctionDecision &&
       !update.resolveCurrent &&
       actual.contract.track === update.track &&
-      ["served", "externally-resolved"].includes(actual.status);
+      attemptClosed(actual);
     if (
       actual &&
       !closedCorrection &&
@@ -211,7 +221,7 @@ export async function compileRoadmapAdoption(
         !captured ||
         captured.encounter !== actual.encounter ||
         actual.contract.track !== update.track ||
-        ["served", "externally-resolved"].includes(actual.status))
+        attemptClosed(actual))
     )
       throw Error(
         "A current attempt needs explicit captured work/session reconciliation before external resolution",
@@ -394,12 +404,9 @@ export async function compileRoadmapAdoption(
       return false;
     const progress = learningProgress(work, id);
     const baseline =
-      r.tracks[id.startsWith("PY:") ? "PY" : "PE"].objectives.find(
-        (o) => o.id === id,
-      )?.cells[depth - 1] ??
-      finalRequirements(r, id.startsWith("PY:") ? "PY" : "PE").find(
-        (d) => d.id === id,
-      )?.status;
+      r.tracks[trackOf(id)].objectives.find((o) => o.id === id)?.cells[
+        depth - 1
+      ] ?? finalRequirements(r, trackOf(id)).find((d) => d.id === id)?.status;
     const partial =
       ["G", "R"].includes(baseline ?? "") ||
       Object.entries(progress.facets).some(
@@ -582,9 +589,9 @@ export async function compileRoadmapAdoption(
   );
   for (const d of Object.values(work.scopes)) {
     if (!withdrawnScopes.has(d.id) || !(d.objectiveId in work.cells)) continue;
-    const source = parsed.tracks[
-      d.objectiveId.startsWith("PY:") ? "PY" : "PE"
-    ].objectives.find((o) => o.id === d.objectiveId)!;
+    const source = parsed.tracks[trackOf(d.objectiveId)].objectives.find(
+      (o) => o.id === d.objectiveId,
+    )!;
     if (
       source.cells[d.depth - 1] === "P" &&
       !baselineCheckpointValid(r, work, d.objectiveId, d.depth) &&
@@ -794,12 +801,13 @@ export async function compileRoadmapAdoption(
           if (
             !d ||
             !work.verifiedScopes.includes(key) ||
-            !d.facets.every(
-              (f) =>
-                cell.facets[`D${i + 1}:${f.id}`]?.outcome === "independent" &&
-                cell.facets[`D${i + 1}:${f.id}`].evidenceIds.some((ref) =>
-                  independentProofValid(r, work, o.id, i + 1, f.id, ref),
-                ),
+            !facetsIndependentlyProven(
+              r,
+              work,
+              o.id,
+              i + 1,
+              d.facets,
+              cell.facets,
             )
           )
             throw Error(`Unsupported imported full checkpoint ${key}`);
@@ -873,9 +881,7 @@ export async function compileRoadmapAdoption(
             a.session === existing.id && a.status === "externally-resolved",
         ) &&
         !work.attempts.some(
-          (a) =>
-            a.session === existing.id &&
-            !["served", "externally-resolved"].includes(a.status),
+          (a) => a.session === existing.id && !attemptClosed(a),
         )
       )
         delete work.currentSession;
@@ -928,17 +934,12 @@ export async function compileRoadmapAdoption(
     // The reviewed document carries the full original scheduler. Replace the
     // prior full cursor before narrowing active scheduling again; otherwise
     // a later export/full restore would resurrect the pre-adoption cursor.
-    (
-      work as LearnerLedger & {
-        careerFullTrack?: LearnerLedger["tracks"]["PE"];
-      }
-    ).careerFullTrack = structuredClone(work.tracks.PE);
+    work.careerFullTrack = structuredClone(work.tracks.PE);
     // One reconciliation makes only two tier sweeps. An adopted full cursor
     // can start at D1 while retained role-core evidence already supports D3:
     // four sweeps settle D1 -> D2 -> D3 -> profile completion and release PY D4
     // under the unchanged shared lead limit. No cells or proof are created.
-    reconcileGates(r, work);
-    reconcileGates(r, work);
+    settleGates(r, work, 2);
   }
   const cache: RoadmapExport = {
     content: p.canonical,
