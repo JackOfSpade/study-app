@@ -1,4 +1,4 @@
-import { activateCareerFocus } from "./career-profile";
+import { activateCareerFocus, savedCareerFocus } from "./career-profile";
 import { initialLearner } from "./learner";
 import { initialStudy } from "./curriculum";
 import type { StudyRecord, Roadmap } from "./model";
@@ -26,7 +26,7 @@ export function moveToLiveStudy(g: StudyRecord, r: Roadmap) {
     visits: [],
   };
   delete next.pending;
-  activateCareerFocus(r, next, old.careerFocus ?? "product-feature-owner");
+  activateCareerFocus(r, next, savedCareerFocus(old));
   g.study = next;
   for (const e of Object.values(g.encounters)) {
     if (e.problem?.provenance !== "development" || e.state === "consumed")

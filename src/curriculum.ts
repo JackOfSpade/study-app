@@ -10,9 +10,13 @@ import {
   localDate,
 } from "./learner";
 import type { LearnerLedger } from "./learning-model";
-import { servedLearningAttempts, studyRatioPosition } from "./learning-model";
 import {
-  type Assessment,
+  ratioTrack,
+  servedLearningAttempts,
+  STUDY_RATIO,
+  studyRatioPosition,
+} from "./learning-model";
+import {
   type Contract,
   type Encounter,
   type Roadmap,
@@ -65,7 +69,7 @@ export function eligible(
     return eligibleLearning(r, s.learner, `${today}T16:00:00Z`);
   }
   if (s.pending) return structuredClone(s.pending.contract);
-  const track: Track = (["PY", "PE", "PE"] as const)[studyRatioPosition(s)],
+  const track: Track = ratioTrack(s),
     t = r.tracks[track];
   // One bounded review on a track turn, followed by breadth work before another review.
   const last = s.visits.filter((v) => v.contract.track === track).at(-1);
@@ -121,7 +125,7 @@ export function eligible(
   };
 }
 export function beginVisit(r: Roadmap, s: StudyState, e: Encounter) {
-  // A variety practice terminal is never the scheduled visit.
+  // A practice question is never the scheduled visit.
   if (e.problem?.contract.practice) return;
   if (s.profile === "live") {
     s.learner ??= initialLearner(r);
@@ -141,7 +145,7 @@ export function beginVisit(r: Roadmap, s: StudyState, e: Encounter) {
     throw Error("Encounter is not the scheduled study visit.");
   if (s.pending && s.pending.encounter !== key)
     throw Error(
-      "Unfinished study visit remains bound to its original terminal.",
+      "Unfinished study visit remains bound to its original question.",
     );
   s.session ??= "DEVELOPMENT";
   s.pending = { encounter: key, contract: c };
@@ -159,9 +163,7 @@ export function countStudyTurn(s: StudyState, e: Encounter) {
   e.studyTurnRecorded = true;
   const position = studyRatioPosition(ledger);
   ledger.studyTurnPosition =
-    c.track === (["PY", "PE", "PE"] as const)[position]
-      ? (position + 1) % 3
-      : position;
+    c.track === STUDY_RATIO[position] ? (position + 1) % 3 : position;
   if (s.profile === "live") syncLearningView(s);
 }
 export function finishVisit(
@@ -192,55 +194,6 @@ export function finishVisit(
   s.cycle++;
   s.version++;
   delete s.pending;
-}
-export function validateAssessment(r: Roadmap, e: Encounter, a: Assessment) {
-  if (a.encounter !== e.id || !e.problem || a.findings.length > 40)
-    throw Error("Invalid assessment identity");
-  for (const f of a.findings) {
-    if (
-      !e.problem.contract.objectiveIds.includes(f.objectiveId) ||
-      !r.tracks[e.problem.contract.track].objectives.some(
-        (o) => o.id === f.objectiveId,
-      )
-    )
-      throw Error("Unknown or out-of-scope objective");
-    if (
-      !f.facet ||
-      !["independent", "assisted", "unknown"].includes(f.outcome) ||
-      !f.rationale
-    )
-      throw Error("Malformed facet");
-    const evidence = e.history.filter((h) => f.evidence.includes(h.seq)),
-      latestEvidence = evidence.reduce(
-        (latest, h) => Math.max(latest, h.seq),
-        -Infinity,
-      );
-    if (
-      f.outcome === "independent" &&
-      (!evidence.length ||
-        evidence.some(
-          (h) =>
-            h.author !== "human" ||
-            !["edit", "reasoning", "test"].includes(h.kind),
-        ))
-    )
-      throw Error(
-        "Independent evidence must be human-authored technical artifacts",
-      );
-    // Any earlier supplied solution is conservatively unresolved until a facet-aware reviewer checks dependencies.
-    if (
-      f.outcome === "independent" &&
-      [...(e.group ?? []), ...e.tutor].some(
-        (m) =>
-          m.kind !== "human" &&
-          m.kind !== "system" &&
-          m.presented !== undefined &&
-          m.presented < latestEvidence,
-      )
-    )
-      throw Error("Prior help requires explicit dependency review");
-  }
-  return true;
 }
 export function evidencePacket(
   e: Encounter,

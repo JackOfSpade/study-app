@@ -1483,3 +1483,98 @@ test("rejected irrelevant assistant embellishment needs explicit attribution bef
   assert.equal(l.evidence.length, 1);
   assert.deepEqual(l.evidence[0].helpMessageIds, []);
 });
+/** Issue the scheduled contract on a fresh question and serve it with one usable visit. */
+function serveScheduled(l: ReturnType<typeof initialLearner>, id: string) {
+  const g = createRecord(10, r),
+    e = g.encounters["question-0"],
+    c = eligibleLearning(r, l, when);
+  const def = {
+    id: `${c.objectiveIds[0]}/D${c.depth}`,
+    objectiveId: c.objectiveIds[0],
+    depth: c.depth,
+    sourceScope: c.scopes[0],
+    facets: [{ id: "purpose", description: "Explain the mechanism" }],
+  };
+  e.problem = {
+    title: "Isolated breadth fixture",
+    prompt: "This is a test fixture, not actual study.",
+    rubric: ["purpose"],
+    starter: "",
+    provenance: "study-mode",
+    contract: c,
+    scopeDefinitions: [def],
+  };
+  e.history = [
+    {
+      seq: 1,
+      author: "human",
+      kind: "reasoning",
+      text: "Fixture reasoning that is only partly correct.",
+      at: 1,
+      revision: 0,
+      wallTime: when,
+    },
+  ];
+  registerScopes(r, l, e);
+  beginLearningAttempt(r, l, e, when);
+  applyLearningAssessment(
+    r,
+    l,
+    e,
+    {
+      id,
+      encounter: e.id,
+      sourceVersion: l.version,
+      provenance: "test-fixture",
+      status: "pending",
+      visitOutcome: "usable",
+      evidenceCutoffSequence: 1,
+      findings: [
+        {
+          objectiveId: c.objectiveIds[0],
+          depth: c.depth,
+          facet: "purpose",
+          outcome: "assisted",
+          evidence: [1],
+          completeCheckpointScope: false,
+          rationale: "Simulated partial fixture evidence.",
+        },
+      ],
+    },
+    when,
+    "test-fixture",
+  );
+  return c;
+}
+test("an unfocused queue head with no work left at its tier is skipped, not a starved track", () => {
+  const l = initialLearner(r, "test");
+  l.careerFocus = "full";
+  l.reviews = {};
+  const [stale, next, after] = l.tracks.PY.queue;
+  for (const o of r.tracks.PY.objectives)
+    if (o.id.startsWith(`PY:${stale}.`))
+      l.cells[o.id].states[l.tracks.PY.tier - 1] = "P";
+  reconcileGates(r, l);
+  assert.equal(l.tracks.PY.queue[0], stale, "reconciliation keeps the queue");
+  const c = serveScheduled(l, "stale-head-visit");
+  assert.equal(c.track, "PY");
+  assert.equal(c.objectiveIds[0].split(".")[0], `PY:${next}`);
+  assert.equal(c.scheduleNote, undefined);
+  assert.equal(l.attempts[0].status, "served");
+  assert.equal(l.tracks.PY.queue[0], after, "the stale head and visit leave");
+  assert.ok(!l.tracks.PY.queue.includes(stale));
+});
+test("a PE visit after a stale queue head drops both and keeps breadth order", () => {
+  const l = initialLearner(r, "test");
+  l.reviews = {};
+  l.cycleOffset = 1;
+  l.careerFocus = "full";
+  l.tracks.PE.queue = ["X09", "T05", "T06"];
+  for (const o of r.tracks.PE.objectives)
+    if (o.id.startsWith("PE:X09.")) l.cells[o.id].states[0] = "P";
+  reconcileGates(r, l);
+  const c = serveScheduled(l, "stale-pe-head-visit");
+  assert.equal(c.track, "PE");
+  assert.match(c.objectiveIds[0], /^PE:T05\./);
+  assert.deepEqual(l.tracks.PE.queue, ["T06"]);
+});

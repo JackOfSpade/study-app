@@ -17,9 +17,11 @@ import {
   scopeFacetsValid,
   learningProgress,
   progressStatus,
+  FACET_OUTCOMES,
+  HUMAN_TECHNICAL_KINDS,
+  ratioTrack,
   scopeKey,
   setProgressStatus,
-  studyRatioPosition,
   learningAttemptRoot,
   servedLearningAttempts,
   type CellState,
@@ -71,7 +73,26 @@ export const addDays = (day: string, n: number) => {
   return d.toISOString().slice(0, 10);
 };
 const topic = (id: string) => id.split(":")[1].split(".")[0];
-const reviewKey = scopeKey;
+/** Days until the next delayed review at each review stage. */
+export const REVIEW_INTERVAL_DAYS = [3, 7, 21] as const;
+/** A verified delayed review moves its record one stage on from `previous`. */
+export function advanceReview(
+  previous: ReviewRecord,
+  session: string,
+  observedAt?: string,
+): ReviewRecord {
+  const stage = Math.min(2, previous.stage + 1);
+  const next = {
+    ...previous,
+    stage,
+    verifiedReviews: previous.verifiedReviews + 1,
+    lastIndependentAt: observedAt,
+    sequence: session,
+    due: addDays(localDate(observedAt!), REVIEW_INTERVAL_DAYS[stage]),
+  };
+  delete next.lastIndependentDate;
+  return next;
+}
 export function initialLearner(
   r: Roadmap,
   mode: "live" | "test" = "live",
@@ -104,7 +125,7 @@ export function initialLearner(
               l.startsWith(`| ${session} |`),
             )
           : undefined;
-        reviews[reviewKey(o.id, 1)] = {
+        reviews[scopeKey(o.id, 1)] = {
           objectiveId: o.id,
           depth: 1,
           due: o.reviewDue,
@@ -225,11 +246,17 @@ export function registerScopes(r: Roadmap, l: LearnerLedger, e: Encounter) {
   for (const d of e.problem?.scopeDefinitions ?? [])
     l.scopes[d.id] = structuredClone(d);
 }
+/**
+ * Topics with work left at this depth, in rotation order. `anyPhase` also keeps
+ * tier-4 integration work that the DIAGNOSE_ALL phase does not yet schedule, so
+ * a queue entry for it still counts as runnable.
+ */
 function incompleteTopics(
   r: Roadmap,
   l: LearnerLedger,
   t: Track,
   depth: number,
+  anyPhase = false,
 ) {
   const finals =
     depth === 4
@@ -250,18 +277,15 @@ function incompleteTopics(
           l.cells[o.id].states[depth - 1] !== "P",
       ),
   );
-  if (depth === 4 && l.tracks[t].phase !== "DIAGNOSE_ALL")
+  if (depth === 4 && (anyPhase || l.tracks[t].phase !== "DIAGNOSE_ALL"))
     topics.push(
       ...finals.filter((d) => d.kind === "integration").map((d) => d.name),
     );
   return topics;
 }
-type CarryLedger = LearnerLedger & {
-  careerCarryover?: { ledgerVersion: number; contract: Contract };
-};
 /** A pre-switch issued formal contract still valid at this ledger version. */
 function carryover(l: LearnerLedger) {
-  const c = (l as CarryLedger).careerCarryover;
+  const c = l.careerCarryover;
   return c && c.ledgerVersion === l.version ? c.contract : undefined;
 }
 /** Role-focused tracks stop at their profile depth, unless unfinished work is deeper. */
@@ -286,30 +310,25 @@ function focusCap(l: LearnerLedger, t: Track) {
 }
 /** After restoring the full profile, re-add original topics a focused lap dropped. */
 export function restoreFullQueues(r: Roadmap, l: LearnerLedger) {
-  const saved = l as LearnerLedger & {
-    careerFullTrack?: LearnerLedger["tracks"]["PE"];
-  };
-  if (saved.careerFullTrack) {
-    l.tracks.PE = structuredClone(saved.careerFullTrack);
-    delete saved.careerFullTrack;
+  if (l.careerFullTrack) {
+    l.tracks.PE = structuredClone(l.careerFullTrack);
+    delete l.careerFullTrack;
     return;
   }
   // Older focused saves may lack a full-profile cursor. Rebuild only PE,
   // keeping the curriculum's canonical order; Python never changed profile.
-  {
-    const t = "PE" as const;
-    const s = l.tracks[t];
-    if (s.phase === "COMPLETE" && s.cleared < 4) s.phase = "REPAIR_VERIFY";
-    for (const name of incompleteTopics(r, l, t, s.tier))
-      if (!s.queue.includes(name)) s.queue.push(name);
-    const order = [
-      ...r.tracks[t].rotation,
-      ...finalRequirements(r, t)
-        .filter((d) => d.kind === "integration" && d.selected)
-        .map((d) => d.name),
-    ];
-    s.queue.sort((a, b) => order.indexOf(a) - order.indexOf(b));
-  }
+  const t = "PE" as const;
+  const s = l.tracks[t];
+  if (s.phase === "COMPLETE" && s.cleared < 4) s.phase = "REPAIR_VERIFY";
+  for (const name of incompleteTopics(r, l, t, s.tier))
+    if (!s.queue.includes(name)) s.queue.push(name);
+  const order = [
+    ...r.tracks[t].rotation,
+    ...finalRequirements(r, t)
+      .filter((d) => d.kind === "integration" && d.selected)
+      .map((d) => d.name),
+  ];
+  s.queue.sort((a, b) => order.indexOf(a) - order.indexOf(b));
 }
 /** Under a role focus a due review is scheduled only inside the profile's targets. */
 function focusReviewEligible(
@@ -419,6 +438,17 @@ export function reconcileGates(r: Roadmap, l: LearnerLedger) {
     }
   reconcileAttemptGates(l);
 }
+/**
+ * Reconcile until the tracks stop changing. One reconciliation raises a track at
+ * most two tiers, which can leave a restored cursor below what its evidence clears.
+ */
+export function settleGates(r: Roadmap, l: LearnerLedger, max = 4) {
+  for (let run = 0; run < max; run++) {
+    const before = JSON.stringify(l.tracks);
+    reconcileGates(r, l);
+    if (JSON.stringify(l.tracks) === before) return;
+  }
+}
 /** Apply reviewed difficulty ceilings to actual tasks without changing their work. */
 export function reconcileAttemptGates(l: LearnerLedger) {
   for (const a of l.attempts)
@@ -446,16 +476,15 @@ export function eligibleLearning(
   if (pending) return structuredClone(pending.contract);
   const focus = focusOf(l),
     focused = roleFocused(focus);
-  const preferred: Track = (["PY", "PE", "PE"] as const)[studyRatioPosition(l)];
+  const preferred: Track = ratioTrack(l);
+  const served = servedLearningAttempts(l),
+    today = localDate(at);
   for (const track of [
     preferred,
     preferred === "PY" ? "PE" : "PY",
   ] as Track[]) {
     const s = l.tracks[track];
-    const last = servedLearningAttempts(l)
-      .filter((a) => a.contract.track === track)
-      .at(-1);
-    const today = localDate(at);
+    const last = served.filter((a) => a.contract.track === track).at(-1);
     const due =
       last?.contract.review && s.phase !== "COMPLETE"
         ? undefined
@@ -469,14 +498,11 @@ export function eligibleLearning(
                 (!focused || focusReviewEligible(r, l, v)),
             )
             .sort((a, b) => a.due.localeCompare(b.due))[0];
-    const focusedTrack = focused && track === "PE";
-    const incompleteNow = focusedTrack
-      ? incompleteTopics(r, l, track, s.tier)
-      : [];
-    const nextTopic = focusedTrack
-      ? (s.queue.find((name) => incompleteNow.includes(name)) ??
-        incompleteNow[0])
-      : (s.queue[0] ?? incompleteTopics(r, l, track, s.tier)[0]);
+    // Breadth order skips queue entries that no longer need work at this tier.
+    const runnable = incompleteTopics(r, l, track, s.tier, true);
+    const nextTopic =
+      s.queue.find((name) => runnable.includes(name)) ??
+      incompleteTopics(r, l, track, s.tier)[0];
     const final =
       s.tier === 4
         ? finalRequirements(r, track).find(
@@ -548,9 +574,6 @@ export function eligibleLearning(
     "Both tracks are at unresolved gates; do not generate filler or harder work.",
   );
 }
-function attemptRoot(l: LearnerLedger, a: LearningAttempt) {
-  return learningAttemptRoot(l, a);
-}
 export function beginLearningAttempt(
   r: Roadmap,
   l: LearnerLedger,
@@ -610,7 +633,7 @@ export function beginLearningAttempt(
   return attempt;
 }
 /** The interrupted attempt that a new attempt on this contract continues, if any. */
-export function openContinuation(
+function openContinuation(
   l: LearnerLedger,
   c: Pick<Contract, "objectiveIds" | "depth">,
 ) {
@@ -621,8 +644,8 @@ export function openContinuation(
       !l.attempts.some(
         (a) =>
           a.status === "served" &&
-          attemptRoot(l, a) ===
-            attemptRoot(
+          learningAttemptRoot(l, a) ===
+            learningAttemptRoot(
               l,
               l.attempts.find((p) => p.id === k.attemptId)!,
             ),
@@ -728,6 +751,18 @@ export function assistanceSources(e: Encounter) {
     });
   return sources;
 }
+/** Whether a help attribution's facet list names this facet of the objective. */
+function attributionCoversFacet(
+  facets: string[],
+  objectiveId: string,
+  facet: string,
+) {
+  return (
+    facets.includes("*") ||
+    facets.includes(facet) ||
+    facets.includes(`${objectiveId}:${facet}`)
+  );
+}
 function validateProposal(
   r: Roadmap,
   l: LearnerLedger,
@@ -775,20 +810,18 @@ function validateProposal(
   const sources = assistanceSources(e);
   for (const f of a.findings) {
     const d = f.depth ?? c.depth,
-      def = l.scopes[scopeKey(f.objectiveId, d)];
+      def = l.scopes[scopeKey(f.objectiveId, d)],
+      target = learningTarget(r, c.track, f.objectiveId);
     if (
       !c.objectiveIds.includes(f.objectiveId) ||
       d !== c.depth ||
-      !learningTarget(r, c.track, f.objectiveId) ||
-      learningTarget(r, c.track, f.objectiveId)!.target < d ||
-      learningTarget(r, c.track, f.objectiveId)!.kind !==
-        (c.kind ?? "checkpoint") ||
+      !target ||
+      target.target < d ||
+      target.kind !== (c.kind ?? "checkpoint") ||
       !def ||
       !scopes.some((s) => s.id === def.id) ||
       !def.facets.some((p) => p.id === f.facet) ||
-      !["independent", "assisted", "unknown", "contradicted"].includes(
-        f.outcome,
-      ) ||
+      !FACET_OUTCOMES.includes(f.outcome) ||
       !f.rationale?.trim() ||
       (f.assistance !== undefined &&
         (f.outcome !== "assisted" ||
@@ -812,7 +845,7 @@ function validateProposal(
         evidence.some(
           (h) =>
             h.author !== "human" ||
-            !["edit", "reasoning", "test"].includes(h.kind) ||
+            !HUMAN_TECHNICAL_KINDS.includes(h.kind) ||
             !h.text.trim(),
         ))
     )
@@ -871,11 +904,7 @@ function validateProposal(
           attribution.facets.some((id) => typeof id !== "string")
         )
           throw Error("Prior help needs explicit facet attribution");
-        if (
-          attribution.facets.includes("*") ||
-          attribution.facets.includes(f.facet) ||
-          attribution.facets.includes(`${f.objectiveId}:${f.facet}`)
-        )
+        if (attributionCoversFacet(attribution.facets, f.objectiveId, f.facet))
           throw Error("A supplied key step cannot certify independent work");
       }
     }
@@ -1002,7 +1031,7 @@ export function applyLearningAssessment(
     (h) =>
       h.author === "human" &&
       h.seq <= (a.evidenceCutoffSequence ?? Infinity) &&
-      ["edit", "reasoning", "test"].includes(h.kind) &&
+      HUMAN_TECHNICAL_KINDS.includes(h.kind) &&
       h.text.trim(),
   );
   const attempt =
@@ -1092,80 +1121,82 @@ export function applyLearningAssessment(
   const helpPresented = new Map(
     assistanceSources(e).map((m) => [m.id, m.presented]),
   );
-  for (const finding of a.findings) {
-    if (!attempt || !technical) continue;
-    const depth: number = finding.depth ?? e.problem!.contract.depth;
-    const cell = learningProgress(work, finding.objectiveId),
-      key = `D${depth}:${finding.facet}`;
-    const record: LearningEvidence = {
-      id: allocate(r, work, attempt!.session, "EV"),
-      attemptId: attempt!.id,
-      encounter: encounterKey(e),
-      objectiveId: finding.objectiveId,
-      depth,
-      facet: finding.facet,
-      outcome: finding.outcome,
-      ...(finding.assistance ? { assistance: finding.assistance } : {}),
-      artifactSequences: [...finding.evidence],
-      helpMessageIds: (a.helpAttributions ?? [])
-        .filter(
-          (h) =>
-            (h.facets.includes("*") ||
-              h.facets.includes(finding.facet) ||
-              h.facets.includes(`${finding.objectiveId}:${finding.facet}`)) &&
-            // Help shown after the last cited answer cannot have shaped it.
-            (!finding.evidence.length ||
-              (helpPresented.get(h.messageId) ?? 0) <=
-                Math.max(...finding.evidence)),
-        )
-        .map((h) => h.messageId),
-      at,
-      observedAt: (() => {
-        const times = e.history
-          .filter((h) => finding.evidence.includes(h.seq) && h.wallTime)
-          .map((h) => h.wallTime!)
-          .filter(
-            (t) =>
-              Number.isFinite(new Date(t).getTime()) &&
-              new Date(t).getTime() <= new Date(at).getTime(),
-          )
-          .sort();
-        return times.at(-1) ?? (work.mode === "test" ? at : undefined);
-      })(),
-      execution: finding.execution ?? "not-run",
-      rationale: finding.rationale,
-      provider,
-    };
-    work.evidence.push(record);
-    newEvidence.push(record.id);
-    const old = cell.facets[key];
-    if (old && supersededEvidence(work, old.evidenceIds, record)) {
-      // Preserve the raw receipt without allowing an older result to reopen a
-      // repaired checkpoint or recertify a later contradiction.
-      continue;
-    }
-    // Preserve a previously independent facet unless actual contradictory work is identified.
-    if (
-      !old ||
-      old.outcome !== "independent" ||
-      finding.outcome === "contradicted"
-    )
-      cell.facets[key] = {
+  if (attempt && technical)
+    for (const finding of a.findings) {
+      const depth: number = finding.depth ?? e.problem!.contract.depth;
+      const cell = learningProgress(work, finding.objectiveId),
+        key = `D${depth}:${finding.facet}`;
+      const record: LearningEvidence = {
+        id: allocate(r, work, attempt.session, "EV"),
+        attemptId: attempt.id,
+        encounter: encounterKey(e),
+        objectiveId: finding.objectiveId,
+        depth,
+        facet: finding.facet,
         outcome: finding.outcome,
         ...(finding.assistance ? { assistance: finding.assistance } : {}),
-        evidenceIds: [...(old?.evidenceIds ?? []), record.id],
-        updatedAt: at,
+        artifactSequences: [...finding.evidence],
+        helpMessageIds: (a.helpAttributions ?? [])
+          .filter(
+            (h) =>
+              attributionCoversFacet(
+                h.facets,
+                finding.objectiveId,
+                finding.facet,
+              ) &&
+              // Help shown after the last cited answer cannot have shaped it.
+              (!finding.evidence.length ||
+                (helpPresented.get(h.messageId) ?? 0) <=
+                  Math.max(...finding.evidence)),
+          )
+          .map((h) => h.messageId),
+        at,
+        observedAt: (() => {
+          const times = e.history
+            .filter((h) => finding.evidence.includes(h.seq) && h.wallTime)
+            .map((h) => h.wallTime!)
+            .filter(
+              (t) =>
+                Number.isFinite(new Date(t).getTime()) &&
+                new Date(t).getTime() <= new Date(at).getTime(),
+            )
+            .sort();
+          return times.at(-1) ?? (work.mode === "test" ? at : undefined);
+        })(),
+        execution: finding.execution ?? "not-run",
+        rationale: finding.rationale,
+        provider,
       };
-    else old.evidenceIds.push(record.id);
-    if (finding.outcome === "assisted" && progressStatus(cell, depth) === "U")
-      setProgressStatus(cell, depth, "G");
-    if (finding.outcome === "contradicted")
-      setProgressStatus(
-        cell,
-        depth,
-        progressStatus(cell, depth) === "P" ? "R" : "G",
-      );
-  }
+      work.evidence.push(record);
+      newEvidence.push(record.id);
+      const old = cell.facets[key];
+      if (old && supersededEvidence(work, old.evidenceIds, record)) {
+        // Preserve the raw receipt without allowing an older result to reopen a
+        // repaired checkpoint or recertify a later contradiction.
+        continue;
+      }
+      // Preserve a previously independent facet unless actual contradictory work is identified.
+      if (
+        !old ||
+        old.outcome !== "independent" ||
+        finding.outcome === "contradicted"
+      )
+        cell.facets[key] = {
+          outcome: finding.outcome,
+          ...(finding.assistance ? { assistance: finding.assistance } : {}),
+          evidenceIds: [...(old?.evidenceIds ?? []), record.id],
+          updatedAt: at,
+        };
+      else old.evidenceIds.push(record.id);
+      if (finding.outcome === "assisted" && progressStatus(cell, depth) === "U")
+        setProgressStatus(cell, depth, "G");
+      if (finding.outcome === "contradicted")
+        setProgressStatus(
+          cell,
+          depth,
+          progressStatus(cell, depth) === "P" ? "R" : "G",
+        );
+    }
   const touched = new Set(
     a.findings.map((f) =>
       scopeKey(f.objectiveId, f.depth ?? e.problem!.contract.depth),
@@ -1203,7 +1234,7 @@ export function applyLearningAssessment(
       cell.proofs[String(def.depth)] = [
         ...new Set([...(cell.proofs[String(def.depth)] ?? []), ...proofRefs]),
       ];
-      const reviewId = reviewKey(def.objectiveId, def.depth),
+      const reviewId = scopeKey(def.objectiveId, def.depth),
         review = work.reviews[reviewId];
       const delayedEvidence =
         review && attempt
@@ -1276,44 +1307,32 @@ export function applyLearningAssessment(
           verifiedReviews: 0,
         };
       else if (
-        def.facets.every((f) =>
-          delayedEvidence.some(
-            (ev) =>
-              ev.attemptId === attempt?.id &&
-              ev.objectiveId === def.objectiveId &&
-              ev.depth === def.depth &&
-              ev.facet === f.id &&
-              ev.outcome === "independent",
-          ),
-        ) &&
-        delayedEvidence.some((ev) => newEvidence.includes(ev.id)) &&
         e.problem!.contract.review &&
         review &&
         attempt &&
-        delayedEvidence.length
+        def.facets.every((f) =>
+          delayedEvidence.some((ev) => ev.facet === f.id),
+        ) &&
+        delayedEvidence.some((ev) => newEvidence.includes(ev.id))
       ) {
-        const previousReview = structuredClone(review);
-        review.stage = Math.min(2, review.stage + 1);
-        review.verifiedReviews++;
-        review.lastIndependentAt = delayedEvidence
-          .map((ev) => ev.observedAt)
-          .filter((t): t is string => !!t)
-          .sort()
-          .at(-1);
-        delete review.lastIndependentDate;
-        review.sequence = attempt.session;
-        review.due = addDays(
-          localDate(review.lastIndependentAt!),
-          [3, 7, 21][review.stage],
+        const after = advanceReview(
+          review,
+          attempt.session,
+          delayedEvidence
+            .map((ev) => ev.observedAt)
+            .filter((t): t is string => !!t)
+            .sort()
+            .at(-1),
         );
+        work.reviews[reviewId] = after;
         (work.retentionHistory ??= []).push({
           scopeId: reviewId,
           assessmentId: a.id,
           attemptId: attempt.id,
           at,
           evidenceIds: delayedEvidence.map((ev) => ev.id),
-          before: previousReview,
-          after: structuredClone(review),
+          before: structuredClone(review),
+          after: structuredClone(after),
         });
       }
     }
@@ -1323,7 +1342,7 @@ export function applyLearningAssessment(
       (other) =>
         other !== attempt &&
         other.status === "served" &&
-        attemptRoot(work, other) === attemptRoot(work, attempt),
+        learningAttemptRoot(work, other) === learningAttemptRoot(work, attempt),
     );
     attempt.status = "served";
     attempt.endedAt = at;
@@ -1343,9 +1362,17 @@ export function applyLearningAssessment(
             s.queue = required;
           }
         } else {
-          if (s.queue[0] !== visited)
+          // Leading entries with no work left at this tier were skipped by
+          // the scheduler; the visit must still be the first runnable one.
+          const required = incompleteTopics(r, work, c.track, s.tier, true),
+            index = s.queue.indexOf(visited);
+          if (
+            s.queue.find(
+              (name) => name === visited || required.includes(name),
+            ) !== (index >= 0 ? visited : undefined)
+          )
             throw Error("Visit would violate breadth order");
-          s.queue.shift();
+          s.queue.splice(0, index >= 0 ? index + 1 : s.queue.length);
         }
         if (
           (!roleFocused(focusOf(work)) || c.track !== "PE") &&
@@ -1357,10 +1384,10 @@ export function applyLearningAssessment(
         }
       }
       work.cycle++;
-      const root = attemptRoot(work, attempt);
+      const root = learningAttemptRoot(work, attempt);
       work.continuations = work.continuations.filter(
         (c) =>
-          attemptRoot(
+          learningAttemptRoot(
             work,
             work.attempts.find((a) => a.id === c.attemptId)!,
           ) !== root,
@@ -1368,12 +1395,12 @@ export function applyLearningAssessment(
     }
     // A late ancestor can serve the family before its replacement is answered.
     // Retain the replacement's work, but release the already consumed visit.
-    const root = attemptRoot(work, attempt);
+    const root = learningAttemptRoot(work, attempt);
     for (const sibling of work.attempts)
       if (
         sibling !== attempt &&
         ["in-progress", "suspended"].includes(sibling.status) &&
-        attemptRoot(work, sibling) === root
+        learningAttemptRoot(work, sibling) === root
       )
         sibling.status = "interrupted";
   }

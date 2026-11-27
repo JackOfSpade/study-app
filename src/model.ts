@@ -1,4 +1,8 @@
-import type { LearnerLedger, ScopeDefinition } from "./learning-model";
+import type {
+  CareerFocus,
+  LearnerLedger,
+  ScopeDefinition,
+} from "./learning-model";
 export type Track = "PY" | "PE";
 /** A connected AI provider; development practice has no provider. */
 export type Provider = "study-mode" | "chatgpt-handoff" | "claude-cli";
@@ -100,7 +104,7 @@ export interface StudyState {
   /** Facets established in conversation (answered or implied); never mastery. */
   knowledgeEstablished?: import("./knowledge-probe").KnowledgeEstablishedRecord[];
   profile?: "development" | "live";
-  careerFocus?: "product-feature-owner" | "full";
+  careerFocus?: CareerFocus;
   learner?: LearnerLedger;
   version: number;
   cycle: number;
