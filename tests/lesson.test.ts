@@ -976,6 +976,35 @@ test("a lesson loaded as interrupted is resumed, and one the relay refused stays
   assert.equal(h2.lessons.record(gap.id)!.state, "ready");
 });
 
+test("resumable says no while lessons are unavailable, and resume works detached", async () => {
+  const { g, contract } = fixture();
+  const gap = gapOf(g, contract);
+  g.study.knowledgeGaps = [gap];
+  const caps: string[] = [];
+  const h = harness(good(), caps);
+  await h.mem.store.put({
+    key: gap.id,
+    state: "pending",
+    requestId: "lesson-lost-3",
+    attempt: 1,
+    createdAt: "2026-11-19T09:00:00.000Z",
+    responses: {},
+    chat: [],
+    chatSeq: 0,
+  });
+  await h.lessons.load();
+  // Nothing could be sent, so there is nothing for the caller to wait on.
+  assert.equal(h.lessons.resumable(g), false);
+  caps.push("lesson", "lesson-chat");
+  assert.equal(h.lessons.resumable(g), true);
+  const { resume } = h.lessons;
+  resume(g, r);
+  await idle();
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.calls[0].payload.requestId, "lesson-lost-3");
+  assert.equal(h.lessons.record(gap.id)!.state, "ready");
+});
+
 test("an interrupted lesson whose gap is no longer in the record is not sent", async () => {
   const { g, contract } = fixture();
   const gap = gapOf(g, contract);

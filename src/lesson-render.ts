@@ -12,7 +12,8 @@
  * Nothing here touches the learner's saved record: answers go out through the
  * caller's `onResponse` and nowhere else.
  */
-import { lessonBlockKey } from "../scripts/lib/lesson-schema.mjs";
+import { LESSON_ID, lessonBlockKey } from "../scripts/lib/lesson-schema.mjs";
+import { setNodeText } from "./dom";
 import {
   codeRuns,
   rich,
@@ -27,7 +28,7 @@ import {
   type LessonNode,
   type PreparedSteps,
 } from "./lesson-figures";
-import type { LessonBlock, LessonDoc } from "./lesson-types";
+import type { BlockOf, LessonBlock, LessonDoc } from "./lesson-types";
 import { markdownToHtml } from "./markdown";
 
 export type { LessonNode } from "./lesson-figures";
@@ -122,11 +123,7 @@ function assertAttr(
     throw new Error(`Lesson attribute not allowed: ${name}`);
   if (typeof value !== "string")
     throw new Error(`Lesson attribute ${name} is not text`);
-  if (
-    /^\s*javascript:/i.test(value) ||
-    /javascript:/i.test(value) ||
-    value.includes("<")
-  )
+  if (/javascript:/i.test(value) || value.includes("<"))
     throw new Error(`Lesson attribute ${name} holds a script or markup`);
   if (!VALUE_CHARS.test(value))
     throw new Error(
@@ -178,7 +175,6 @@ export function assertSafeTree(node: LessonNode): void {
 // The pure tree
 // ---------------------------------------------------------------------------
 
-const SECTION_ID = /^[a-z][a-z0-9-]{0,31}$/;
 const MIN_RECALL = 20;
 const LANGUAGES = new Set([
   "python",
@@ -197,11 +193,9 @@ const CALLOUTS: Record<string, { label: string; cls: string }> = {
 /** Recall's comparison unlocks once the learner has written enough to compare. */
 export const recallReady = (text: string) => text.trim().length >= MIN_RECALL;
 
-type Of<K extends LessonBlock["kind"]> = Extract<LessonBlock, { kind: K }>;
-
 /** What a predict block shows once an option is chosen. Words are neutral. */
 export function predictOutcome(
-  block: Of<"predict">,
+  block: BlockOf<"predict">,
   chosenId: string | undefined,
 ) {
   const index =
@@ -224,12 +218,13 @@ const hiddenIf = (hide: boolean): Record<string, string> =>
   hide ? { hidden: "" } : {};
 
 function predictNode(
-  block: Of<"predict">,
+  block: BlockOf<"predict">,
   at: Place,
   response: string | undefined,
 ): LessonNode {
   const outcome = predictOutcome(block, response);
   const answered = outcome !== undefined;
+  const promptId = `lesson-predict-${at.section}-${at.block}-prompt`;
   const options = block.options.map((option, i) => {
     const chosen = outcome?.index === i;
     return n(
@@ -253,19 +248,21 @@ function predictNode(
     },
     {
       children: [
-        n("p", { class: "lesson-prompt" }, rich(block.prompt)),
+        n("p", { class: "lesson-prompt", id: promptId }, rich(block.prompt)),
         n(
           "div",
-          { class: "lesson-options", role: "group" },
+          {
+            class: "lesson-options",
+            role: "group",
+            "aria-labelledby": promptId,
+          },
           { children: options },
         ),
+        // Always rendered, empty until a choice: a live region that is shown
+        // only as its text arrives is often not announced.
         n(
           "p",
-          {
-            class: "lesson-predict-result",
-            "aria-live": "polite",
-            ...hiddenIf(!answered),
-          },
+          { class: "lesson-predict-result", "aria-live": "polite" },
           { text: outcome?.text ?? "" },
         ),
         n(
@@ -278,7 +275,11 @@ function predictNode(
   );
 }
 
-function recallNode(block: Of<"recall">, at: Place, saved: string): LessonNode {
+function recallNode(
+  block: BlockOf<"recall">,
+  at: Place,
+  saved: string,
+): LessonNode {
   const uid = `lesson-recall-${at.section}-${at.block}`;
   const ready = recallReady(saved);
   return n(
@@ -497,7 +498,7 @@ function blockNode(
         },
       );
     case "steps":
-      return stepsFigure(block, at, uid)?.node;
+      return stepsFigure(block, at, uid);
     case "predict":
       return predictNode(block, at, responses[key]);
     case "recall":
@@ -529,7 +530,7 @@ export function lessonTree(
     ),
   );
   const sections = lesson.sections.map((section, si) => {
-    if (!SECTION_ID.test(section.id))
+    if (!LESSON_ID.test(section.id))
       throw new Error("A lesson section id is not valid.");
     const blocks = section.blocks.flatMap((block, bi) => {
       const made = blockNode(
@@ -630,21 +631,19 @@ function build(node: LessonNode, actions: Map<Element, LessonNode>): Element {
 }
 
 const setText = (el: Element | null | undefined, text: string) => {
-  if (el && el.textContent !== text) el.textContent = text;
+  if (el) setNodeText(el, text);
 };
 
-/** setText for a plain-text field that may hold `code` spans (see rich). */
+/** setText for a plain-text field that may hold `code` spans: draws the same
+ * nodes `rich` gives the field when the lesson is mounted. */
 const setRich = (el: Element | null | undefined, text: string) => {
-  const runs = codeRuns(text);
-  if (!el || el.textContent === runs.join("")) return;
-  el.replaceChildren(
-    ...runs.flatMap((run, i) => {
-      if (run === "") return [];
-      const part = document.createElement(i % 2 ? "code" : "span");
-      part.textContent = run;
-      return [part];
-    }),
-  );
+  if (!el || el.textContent === codeRuns(text).join("")) return;
+  const { text: plain, children } = rich(text);
+  if (plain !== undefined) el.textContent = plain;
+  else
+    el.replaceChildren(
+      ...(children ?? []).map((child) => build(child, new Map())),
+    );
 };
 
 /** Steps one figure through its frames by changing the nodes it already has. */
@@ -732,28 +731,22 @@ export function mountLesson(
   });
   const steps = new Map<Element, StepsView>();
   root.querySelectorAll("figure.lesson-steps").forEach((figure) => {
-    const block = blockOf(figure);
+    const block = placeOf(figure)?.block;
     if (block?.kind === "steps")
       steps.set(figure, new StepsView(figure, prepareSteps(block)));
   });
 
-  /** The block (and its saved-answer key) an element belongs to. */
-  function blockOf(el: Element) {
+  /** The block an element belongs to, and its saved-answer key. */
+  function placeOf(el: Element) {
     const holder = el.closest("[data-block]");
     if (!holder) return undefined;
     const section =
       lesson.sections[Number(holder.getAttribute("data-section"))];
     const index = Number(holder.getAttribute("data-block"));
     const block = section?.blocks[index];
-    return block;
-  }
-  function keyOf(el: Element) {
-    const holder = el.closest("[data-block]");
-    const section =
-      lesson.sections[Number(holder?.getAttribute("data-section"))];
-    return section
-      ? lessonBlockKey(section.id, Number(holder?.getAttribute("data-block")))
-      : "";
+    return block && section
+      ? { block, key: lessonBlockKey(section.id, index) }
+      : undefined;
   }
 
   function scrollToSection(id: string) {
@@ -770,8 +763,9 @@ export function mountLesson(
   }
 
   function choose(button: Element) {
-    const block = blockOf(button);
-    if (block?.kind !== "predict") return;
+    const place = placeOf(button);
+    const block = place?.block;
+    if (!place || block?.kind !== "predict") return;
     const figure = button.closest(".lesson-predict");
     if (!figure || figure.classList.contains("is-answered")) return;
     const option = block.options[Number(button.getAttribute("data-option"))];
@@ -784,14 +778,12 @@ export function mountLesson(
       b.setAttribute("aria-pressed", String(i === outcome.index));
       b.setAttribute("aria-disabled", "true");
     });
-    const result = figure.querySelector<HTMLElement>(".lesson-predict-result");
-    setText(result, outcome.text);
-    if (result) result.hidden = false;
+    setText(figure.querySelector(".lesson-predict-result"), outcome.text);
     const explanation = figure.querySelector<HTMLElement>(
       ".lesson-explanation",
     );
     if (explanation) explanation.hidden = false;
-    options.onResponse(keyOf(button), option.id);
+    options.onResponse(place.key, option.id);
   }
 
   const recallParts = (el: Element) => {
@@ -856,7 +848,8 @@ export function mountLesson(
     if (hit?.on !== "recall-input") return;
     const parts = recallParts(hit.el);
     const value = (hit.el as HTMLTextAreaElement).value;
-    options.onResponse(keyOf(hit.el), value);
+    const key = placeOf(hit.el)?.key;
+    if (key) options.onResponse(key, value);
     const ready = recallReady(value);
     if (parts.reveal) parts.reveal.disabled = !ready;
     if (parts.hint) parts.hint.hidden = ready;
@@ -868,6 +861,8 @@ export function mountLesson(
       return;
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
     const target = event.target instanceof Element ? event.target : null;
+    // The code panel scrolls sideways with the arrow keys; leave them to it.
+    if (target?.closest(".lesson-pre, textarea, input")) return;
     const figure = target?.closest("figure.lesson-steps");
     const view = figure ? steps.get(figure) : undefined;
     if (!view) return;

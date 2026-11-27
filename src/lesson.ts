@@ -15,6 +15,7 @@ import {
   LESSON_POLICY,
 } from "../scripts/lib/lesson-policy.mjs";
 import {
+  LESSON_ID,
   LESSON_LIMITS,
   lessonPlainText,
   normalizeLesson,
@@ -23,16 +24,22 @@ import { isInterruption, type bridgeRequest } from "./bridge-client";
 import { encounterKey } from "./learner";
 import { scopeKey } from "./learning-model";
 import type { KnowledgeGapRecord } from "./knowledge-probe";
-import { type LessonEntry, type LessonStore } from "./lesson-store";
+import {
+  LESSON_STORE_LIMITS,
+  type LessonEntry,
+  type LessonStore,
+} from "./lesson-store";
 import type { LessonGap, LessonMessage } from "./lesson-types";
 import type { Roadmap, StudyRecord } from "./model";
 import { isRecord } from "./records";
 
-export const LESSON_CHAT_KEEP = 200;
-/** The longest a learner's saved answer to a predict or recall block may be. */
-const RESPONSE_CHARS = 4000;
 const SAVE_DELAY_MS = 400;
-const BLOCK_KEY = /^([a-z][a-z0-9-]{0,31})\/(\d{1,3})$/;
+/** The longest message the learner can send the tutor. */
+const MESSAGE_CHARS = 4000;
+/** A saved answer's key, `<sectionId>/<index>` (see `lessonBlockKey`). */
+const BLOCK_KEY = new RegExp(
+  `^(${LESSON_ID.source.slice(1, -1)})\\/(\\d{1,3})$`,
+);
 
 /** What a lesson needs to know about a recorded gap. */
 export function lessonGap(gap: KnowledgeGapRecord): LessonGap {
@@ -256,8 +263,8 @@ export function createLessons(host: LessonHost) {
     chatting.has(rec.key) || rec.chat.some((m) => m.state === "pending");
 
   function trimChat(rec: LessonEntry) {
-    if (rec.chat.length > LESSON_CHAT_KEEP)
-      rec.chat = rec.chat.slice(-LESSON_CHAT_KEEP);
+    if (rec.chat.length > LESSON_STORE_LIMITS.chat)
+      rec.chat = rec.chat.slice(-LESSON_STORE_LIMITS.chat);
   }
 
   /** True when the request was started, whatever its outcome. */
@@ -306,7 +313,7 @@ export function createLessons(host: LessonHost) {
           sectionIds,
           ...(focus && sectionIds.includes(focus) ? { focus } : {}),
           history,
-          message: message.text.slice(0, 4000),
+          message: message.text.slice(0, MESSAGE_CHARS),
         },
         {
           onText: (text) => {
@@ -360,7 +367,7 @@ export function createLessons(host: LessonHost) {
 
   /** Lessons and chat messages that were only cut off, with the gap a lesson
    * is written for. A lesson whose gap is gone waits for the learner. */
-  function resumable(g: StudyRecord) {
+  function findResumable(g: StudyRecord) {
     const found: { rec: LessonEntry; gap?: KnowledgeGapRecord }[] = [];
     for (const rec of records.values()) {
       if (generating.has(rec.key) || chatting.has(rec.key)) continue;
@@ -384,6 +391,116 @@ export function createLessons(host: LessonHost) {
   function available() {
     const have = host.capabilities();
     return have.includes("lesson") && have.includes("lesson-chat");
+  }
+
+  async function generate(
+    g: StudyRecord,
+    r: Roadmap,
+    gap: KnowledgeGapRecord,
+    options?: { fresh?: boolean },
+  ): Promise<void> {
+    const key = gap.id;
+    let rec = records.get(key);
+    if (generating.has(key) || rec?.state === "pending") return;
+    if (rec?.lesson && !options?.fresh) return;
+    generating.add(key);
+    // Only a lost connection or an unfinished request keeps its identity;
+    // see `answered` below for the other case.
+    const retrying =
+      !!rec &&
+      (rec.state === "failed" || rec.state === "interrupted") &&
+      !!rec.requestId;
+    const attempt = (rec?.attempt ?? 0) + 1;
+    const requestId = retrying
+      ? rec!.requestId
+      : `lesson-${key}-${attempt}-${shortId()}`;
+    const description = gap.facet.description.slice(0, 600);
+    if (!rec) {
+      rec = {
+        key,
+        state: "pending",
+        requestId,
+        attempt,
+        createdAt: now(),
+        responses: {},
+        chat: [],
+        chatSeq: 0,
+        gapDescription: description,
+      };
+      records.set(key, rec);
+    } else {
+      rec.state = "pending";
+      rec.requestId = requestId;
+      rec.attempt = attempt;
+      rec.gapDescription = description;
+      delete rec.error;
+    }
+    const target = rec;
+    const previousTitle = target.lesson?.title;
+    queueSave(target);
+    changed();
+    // Set once the bridge has answered: a failure after that is the app
+    // refusing the reply, not a transport failure.
+    let answered = false;
+    try {
+      if (!available())
+        throw Error("Claude is not connected, so no lesson can be written.");
+      const reply = await host.request(
+        "lesson",
+        lessonPayload(g, r, gap, requestId, previousTitle),
+      );
+      answered = true;
+      if (!isRecord(reply)) throw Error("The reply could not be read.");
+      if (reply.requestId !== requestId || reply.gapId !== key)
+        throw Error("The reply was for a different request.");
+      const { lesson, dropped } = normalizeLesson(reply.lesson);
+      // The first valid lesson, or the replacement, lands in one step; a
+      // replacement also clears what belonged to the old one.
+      if (target.lesson) {
+        target.responses = {};
+        target.chat = [];
+        delete target.readAt;
+        // An older chat request may still be in flight: let go of the key
+        // so the new conversation can send.
+        chatting.delete(key);
+        streams.delete(key);
+      }
+      target.lesson = lesson;
+      if (dropped.length) target.dropped = dropped;
+      else delete target.dropped;
+      target.state = "ready";
+      delete target.error;
+    } catch (error) {
+      // Only a cut line keeps the request to be sent again by itself.
+      const cut = !answered && isInterruption(error);
+      target.state = cut ? "interrupted" : "failed";
+      target.error = cut
+        ? LESSON_CUT_OFF
+        : plain(
+            error,
+            answered
+              ? "The lesson that came back could not be used"
+              : "The lesson could not be written",
+          );
+      // The gateway keeps an accepted answer by request id, so a retry under
+      // the same identity would be handed the reply the app just refused.
+      if (answered) target.requestId = `lesson-${key}-${attempt}-${shortId()}`;
+    } finally {
+      generating.delete(key);
+    }
+    queueSave(target);
+    changed();
+    await writes;
+  }
+
+  /** Sends the last message again when it failed: under its own request id
+   * when it was only cut off, under a new one when its reply was refused. */
+  async function retryChat(key: string): Promise<boolean> {
+    const rec = records.get(key);
+    if (!rec?.lesson || rec.state !== "ready" || chatBusy(rec)) return false;
+    const last = rec.chat[rec.chat.length - 1];
+    if (last?.role !== "learner" || last.state !== "failed") return false;
+    return runChat(rec, last, cutOff(last));
   }
 
   return {
@@ -424,106 +541,7 @@ export function createLessons(host: LessonHost) {
     saveError: (key: string) => saveNotes.get(key) ?? "",
     record: (key: string): LessonEntry | undefined => records.get(key),
     available,
-    async generate(
-      g: StudyRecord,
-      r: Roadmap,
-      gap: KnowledgeGapRecord,
-      options?: { fresh?: boolean },
-    ): Promise<void> {
-      const key = gap.id;
-      let rec = records.get(key);
-      if (generating.has(key) || rec?.state === "pending") return;
-      if (rec?.lesson && !options?.fresh) return;
-      generating.add(key);
-      // Only a lost connection or an unfinished request keeps its identity;
-      // see `answered` below for the other case.
-      const retrying =
-        !!rec &&
-        (rec.state === "failed" || rec.state === "interrupted") &&
-        !!rec.requestId;
-      const attempt = (rec?.attempt ?? 0) + 1;
-      const requestId = retrying
-        ? rec!.requestId
-        : `lesson-${key}-${attempt}-${shortId()}`;
-      const description = gap.facet.description.slice(0, 600);
-      if (!rec) {
-        rec = {
-          key,
-          state: "pending",
-          requestId,
-          attempt,
-          createdAt: now(),
-          responses: {},
-          chat: [],
-          chatSeq: 0,
-          gapDescription: description,
-        };
-        records.set(key, rec);
-      } else {
-        rec.state = "pending";
-        rec.requestId = requestId;
-        rec.attempt = attempt;
-        rec.gapDescription = description;
-        delete rec.error;
-      }
-      const target = rec;
-      const previousTitle = target.lesson?.title;
-      queueSave(target);
-      changed();
-      // Set once the bridge has answered: a failure after that is the app
-      // refusing the reply, not a transport failure.
-      let answered = false;
-      try {
-        if (!available())
-          throw Error("Claude is not connected, so no lesson can be written.");
-        const reply = await host.request(
-          "lesson",
-          lessonPayload(g, r, gap, requestId, previousTitle),
-        );
-        answered = true;
-        if (!isRecord(reply)) throw Error("The reply could not be read.");
-        if (reply.requestId !== requestId || reply.gapId !== key)
-          throw Error("The reply was for a different request.");
-        const { lesson, dropped } = normalizeLesson(reply.lesson);
-        // The first valid lesson, or the replacement, lands in one step; a
-        // replacement also clears what belonged to the old one.
-        if (target.lesson) {
-          target.responses = {};
-          target.chat = [];
-          delete target.readAt;
-          // An older chat request may still be in flight: let go of the key
-          // so the new conversation can send.
-          chatting.delete(key);
-          streams.delete(key);
-        }
-        target.lesson = lesson;
-        if (dropped.length) target.dropped = dropped;
-        else delete target.dropped;
-        target.state = "ready";
-        delete target.error;
-      } catch (error) {
-        // Only a cut line keeps the request to be sent again by itself.
-        const cut = !answered && isInterruption(error);
-        target.state = cut ? "interrupted" : "failed";
-        target.error = cut
-          ? LESSON_CUT_OFF
-          : plain(
-              error,
-              answered
-                ? "The lesson that came back could not be used"
-                : "The lesson could not be written",
-            );
-        // The gateway keeps an accepted answer by request id, so a retry under
-        // the same identity would be handed the reply the app just refused.
-        if (answered)
-          target.requestId = `lesson-${key}-${attempt}-${shortId()}`;
-      } finally {
-        generating.delete(key);
-      }
-      queueSave(target);
-      changed();
-      await writes;
-    },
+    generate,
     /** "Done reading". Display only: it records nothing about knowing. */
     markRead(key: string): void {
       const rec = records.get(key);
@@ -545,9 +563,12 @@ export function createLessons(host: LessonHost) {
       if (value === "") delete rec.responses[blockKey];
       else if (
         blockKey in rec.responses ||
-        Object.keys(rec.responses).length < 64
+        Object.keys(rec.responses).length < LESSON_STORE_LIMITS.responses
       )
-        rec.responses[blockKey] = value.slice(0, RESPONSE_CHARS);
+        rec.responses[blockKey] = value.slice(
+          0,
+          LESSON_STORE_LIMITS.responseText,
+        );
       else return;
       const waiting = timers.get(key);
       if (waiting !== undefined) clearTimeout(waiting);
@@ -573,7 +594,7 @@ export function createLessons(host: LessonHost) {
       const message: LessonMessage = {
         id: `m-${shortId()}`,
         role: "learner",
-        text: body.slice(0, 4000),
+        text: body.slice(0, MESSAGE_CHARS),
         at: now(),
         state: "pending",
       };
@@ -582,25 +603,17 @@ export function createLessons(host: LessonHost) {
       trimChat(rec);
       return runChat(rec, message);
     },
-    /** Sends the last message again when it failed: under its own request id
-     * when it was only cut off, under a new one when its reply was refused. */
-    async retryChat(key: string): Promise<boolean> {
-      const rec = records.get(key);
-      if (!rec?.lesson || rec.state !== "ready" || chatBusy(rec)) return false;
-      const last = rec.chat[rec.chat.length - 1];
-      if (last?.role !== "learner" || last.state !== "failed") return false;
-      return runChat(rec, last, cutOff(last));
-    },
+    retryChat,
     /** Sends again, by itself, each lesson and chat message whose request a
      * reload or a lost relay cut off. A refused one waits for the learner. */
     resume(g: StudyRecord, r: Roadmap): void {
       if (!available()) return;
-      for (const { rec, gap } of resumable(g))
-        if (gap) void this.generate(g, r, gap, { fresh: !!rec.lesson });
-        else void this.retryChat(rec.key);
+      for (const { rec, gap } of findResumable(g))
+        if (gap) void generate(g, r, gap, { fresh: !!rec.lesson });
+        else void retryChat(rec.key);
     },
-    /** Whether `resume` has anything to send. */
-    resumable: (g: StudyRecord) => resumable(g).length > 0,
+    /** Whether `resume` has anything to send, and can send it now. */
+    resumable: (g: StudyRecord) => available() && findResumable(g).length > 0,
     /** The tutor's reply so far while it is still being written. Display only. */
     streaming: (key: string): string | undefined => streams.get(key),
     /** Saves any answer still waiting for its pause, and waits for every write. */

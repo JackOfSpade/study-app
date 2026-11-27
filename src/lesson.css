@@ -491,6 +491,10 @@
   margin: 0.7rem 0 0.4rem;
   font-weight: 600;
 }
+/* Kept in the page, empty, until a choice, so its live region is announced. */
+.lesson-predict-result:empty {
+  margin: 0;
+}
 .lesson-explanation {
   padding-top: 0.5rem;
   border-top: 1px solid var(--line, #303a4a);

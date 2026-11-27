@@ -196,6 +196,48 @@ test("a stored lesson is replaced by its normalised clean copy", () => {
   assert.equal(clean.lesson.sections[1].blocks.length, 1);
 });
 
+test("answers follow their blocks when a stored block no longer normalises", () => {
+  const stored = record({
+    responses: {
+      "idea/1": "a",
+      "idea/2": "my recall of the running total",
+      "idea/3": "b",
+      "more/0": "kept",
+    },
+    dropped: ["earlier/0:diagram: from generation"],
+  });
+  const blocks = (stored.lesson as any).sections[0].blocks;
+  // [prose, predict (now invalid), recall, predict]
+  blocks[1].options = "nope";
+  blocks.push(
+    { kind: "recall", prompt: "Say it back.", exemplar: "It adds." },
+    {
+      kind: "predict",
+      prompt: "And then?",
+      options: [
+        { id: "a", text: "Add" },
+        { id: "b", text: "Subtract" },
+      ],
+      correctId: "b",
+      explanation: "It subtracts.",
+    },
+  );
+  const clean = validLessonRecord(JSON.parse(JSON.stringify(stored)));
+  assert.ok(clean?.lesson);
+  assert.deepEqual(
+    clean.lesson.sections[0].blocks.map((b) => b.kind),
+    ["prose", "recall", "predict"],
+  );
+  // The dropped block's answer goes; later answers move up with their blocks.
+  assert.deepEqual(clean.responses, {
+    "idea/1": "my recall of the running total",
+    "idea/2": "b",
+    "more/0": "kept",
+  });
+  // The stored list of dropped blocks is the generation-time one, unchanged.
+  assert.deepEqual(clean.dropped, ["earlier/0:diagram: from generation"]);
+});
+
 test("shape checks reject records that are out of bounds", () => {
   const ok = (over: Record<string, unknown>) =>
     validLessonRecord(JSON.parse(JSON.stringify(record(over)))) !== undefined;

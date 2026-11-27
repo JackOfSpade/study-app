@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   DIAGRAM,
+  diagramTextVersion,
   layoutDiagram,
   prepareSteps,
   wrapLabel,
@@ -296,8 +297,16 @@ test("a saved predict answer comes back chosen, with neutral wording", () => {
   };
   const fresh = lessonTree(fixture(), {});
   assert.equal(find(fresh, "is-chosen").length, 0);
-  assert.equal(find(fresh, "lesson-predict-result")[0].attrs!.hidden, "");
+  // The result's live region is always in the page, empty until a choice, so
+  // its text is announced when it arrives.
+  const freshResult = find(fresh, "lesson-predict-result")[0];
+  assert.equal(freshResult.attrs!.hidden, undefined);
+  assert.equal(freshResult.attrs!["aria-live"], "polite");
+  assert.equal(freshResult.text, "");
   assert.equal(find(fresh, "lesson-explanation")[0].attrs!.hidden, "");
+  const [options] = find(fresh, "lesson-options");
+  const [prompt] = find(fresh, "lesson-predict")[0].children!;
+  assert.equal(options.attrs!["aria-labelledby"], prompt.attrs!.id);
 
   const wrong = lessonTree(fixture(), { "figures-2/2": "opt-a" });
   const [chosen] = find(wrong, "is-chosen");
@@ -483,6 +492,35 @@ test("diagram arrows start and end on box borders and skip bad edges", () => {
   const [ab, ba] = layout.edges;
   assert.notEqual(ab.y1, ba.y1);
   assert.deepEqual(ab.labelLines, ["go"]);
+});
+
+test("the text version keeps an arrow between two boxes with the same label", () => {
+  const block = {
+    kind: "diagram" as const,
+    alt: "a",
+    nodes: [
+      { id: "primary", label: "DB", col: 0, row: 0, tone: "accent" as const },
+      { id: "replica", label: "DB", col: 1, row: 0 },
+      { id: "app", label: "App", col: 2, row: 0 },
+    ],
+    edges: [
+      { from: "primary", to: "replica", label: "copies" },
+      { from: "app", to: "primary" },
+      { from: "app", to: "app" },
+    ],
+  };
+  assert.equal(layoutDiagram(block).edges.length, 2);
+  const texts: string[] = [];
+  walk(diagramTextVersion(block), (node) => {
+    if (node.tag === "li") texts.push(node.text!);
+  });
+  assert.deepEqual(texts, [
+    "DB (1) (emphasised)",
+    "DB (2)",
+    "App",
+    "DB (1) to DB (2): copies",
+    "App to DB (1)",
+  ]);
 });
 
 test("an empty diagram still has a viewBox", () => {

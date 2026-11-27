@@ -14,7 +14,7 @@
  * copies it into the current database untouched and then deletes it; see
  * `connect` below.
  */
-import { normalizeLesson } from "../scripts/lib/lesson-schema.mjs";
+import { LESSON_ID, normalizeLesson } from "../scripts/lib/lesson-schema.mjs";
 import { fnv1a } from "./hash";
 import type { LessonMessage, LessonRecord } from "./lesson-types";
 import { isRecord } from "./records";
@@ -38,9 +38,8 @@ export const LESSON_STORE_LIMITS = {
   key: 200,
 };
 
-/** A lesson record plus the one extra field the tutor chat needs after a
- * reload: the gap's description. Assignable to `LessonRecord`. */
-export type LessonEntry = LessonRecord & { gapDescription?: string };
+/** A stored lesson record. Kept as its own name for existing importers. */
+export type LessonEntry = LessonRecord;
 
 interface Envelope {
   schema: 1;
@@ -48,10 +47,22 @@ interface Envelope {
   checksum: number;
 }
 
-const STATES = ["pending", "ready", "failed", "interrupted"];
-const SECTION_ID = /^[a-z][a-z0-9-]{0,31}$/;
+const STATES: readonly LessonRecord["state"][] = [
+  "pending",
+  "ready",
+  "failed",
+  "interrupted",
+];
+const isState = (v: unknown): v is LessonRecord["state"] =>
+  typeof v === "string" && (STATES as readonly string[]).includes(v);
 const str = (v: unknown, max: number, min = 0): v is string =>
   typeof v === "string" && v.length >= min && v.length <= max;
+const isStringArray = (v: unknown, max: number, each: number): v is string[] =>
+  Array.isArray(v) && v.length <= max && v.every((d) => str(d, each));
+/** A dropped-block note from `normalizeLesson`: `<sectionId>/<index>:...`. */
+const DROPPED_AT = /^([^/]+)\/(\d+):/;
+/** A saved answer's key, `<sectionId>/<index>` (see `lessonBlockKey`). */
+const RESPONSE_KEY = /^([^/]+)\/(\d{1,3})$/;
 const count = (v: unknown, max: number): v is number =>
   typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= max;
 
@@ -80,11 +91,41 @@ function validMessage(
     ...(error !== undefined ? { error } : {}),
     // A pointer to a section the lesson does not have is dropped, not trusted.
     ...(section !== undefined &&
-    SECTION_ID.test(section) &&
+    LESSON_ID.test(section) &&
     sectionIds?.has(section)
       ? { section }
       : {}),
   };
+}
+
+/**
+ * Saved answers are keyed by block position. When normalising the stored lesson
+ * again drops a block (a bound tightened since it was written), the later
+ * blocks of that section move up: their answers move with them, and an answer
+ * to a dropped block goes. Answers in other sections are untouched.
+ */
+function realign(
+  entries: [string, string][],
+  droppedNow: readonly string[],
+): [string, string][] {
+  const gone = new Map<string, number[]>();
+  for (const note of droppedNow) {
+    const at = DROPPED_AT.exec(note);
+    if (!at) continue;
+    const list = gone.get(at[1]) ?? [];
+    list.push(Number(at[2]));
+    gone.set(at[1], list);
+  }
+  if (!gone.size) return entries;
+  return entries.flatMap(([key, value]): [string, string][] => {
+    const at = RESPONSE_KEY.exec(key);
+    const drops = at && gone.get(at[1]);
+    if (!at || !drops) return [[key, value]];
+    const index = Number(at[2]);
+    if (drops.includes(index)) return [];
+    const shift = drops.filter((d) => d < index).length;
+    return [[`${at[1]}/${index - shift}`, value]];
+  });
 }
 
 /**
@@ -111,8 +152,7 @@ export function validLessonRecord(value: unknown): LessonEntry | undefined {
   } = value;
   if (
     !str(key, LESSON_STORE_LIMITS.key, 1) ||
-    typeof state !== "string" ||
-    !STATES.includes(state) ||
+    !isState(state) ||
     !str(requestId, 300) ||
     !count(attempt, 100_000) ||
     (error !== undefined && !str(error, 500)) ||
@@ -123,30 +163,25 @@ export function validLessonRecord(value: unknown): LessonEntry | undefined {
   )
     return undefined;
   let clean: ReturnType<typeof normalizeLesson>["lesson"] | undefined;
+  let droppedNow: string[] = [];
   if (lesson !== undefined) {
     try {
-      clean = normalizeLesson(lesson).lesson;
+      ({ lesson: clean, dropped: droppedNow } = normalizeLesson(lesson));
     } catch {
       return undefined;
     }
   }
   if (state === "ready" && !clean) return undefined;
-  if (
-    dropped !== undefined &&
-    (!Array.isArray(dropped) ||
-      dropped.length > 100 ||
-      !dropped.every((d) => str(d, 300)))
-  )
+  if (dropped !== undefined && !isStringArray(dropped, 100, 300))
     return undefined;
   if (!isRecord(responses)) return undefined;
-  const entries = Object.entries(responses);
-  if (
-    entries.length > LESSON_STORE_LIMITS.responses ||
-    !entries.every(
-      ([k, v]) => str(k, 80, 1) && str(v, LESSON_STORE_LIMITS.responseText),
-    )
-  )
-    return undefined;
+  const entries: [string, string][] = [];
+  for (const [k, v] of Object.entries(responses)) {
+    if (!str(k, 80, 1) || !str(v, LESSON_STORE_LIMITS.responseText))
+      return undefined;
+    entries.push([k, v]);
+  }
+  if (entries.length > LESSON_STORE_LIMITS.responses) return undefined;
   if (!Array.isArray(chat) || chat.length > LESSON_STORE_LIMITS.chat)
     return undefined;
   const sectionIds = clean
@@ -160,15 +195,16 @@ export function validLessonRecord(value: unknown): LessonEntry | undefined {
   }
   return {
     key,
-    state: state as LessonRecord["state"],
+    state,
     requestId,
     attempt,
     ...(error !== undefined ? { error } : {}),
     ...(clean ? { lesson: clean } : {}),
-    ...(dropped !== undefined ? { dropped: [...(dropped as string[])] } : {}),
+    // The generation-time list, kept as stored; a drop found now is not added.
+    ...(dropped !== undefined ? { dropped: [...dropped] } : {}),
     createdAt,
     ...(readAt !== undefined ? { readAt } : {}),
-    responses: Object.fromEntries(entries) as Record<string, string>,
+    responses: Object.fromEntries(realign(entries, droppedNow)),
     chat: messages,
     chatSeq,
     ...(gapDescription !== undefined ? { gapDescription } : {}),
@@ -184,7 +220,7 @@ function encode(record: LessonEntry) {
   } satisfies Envelope);
 }
 
-/** Null for any value that is not a sound record. Never throws. */
+/** Undefined for any value that is not a sound record. Never throws. */
 function decode(value: unknown): LessonEntry | undefined {
   if (typeof value !== "string") return undefined;
   try {
