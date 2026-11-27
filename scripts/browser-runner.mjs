@@ -1,13 +1,31 @@
 import { sha256 } from "./lib/digest.mjs";
-import { docker, boundedText } from "./runner-process.mjs";
+import {
+  docker,
+  inspectImage,
+  isLimitExit,
+  removeContainer,
+  sawMarker,
+} from "./runner-process.mjs";
+import { boundedText } from "./runner-output.mjs";
 import {
   browserContainerOptions,
+  browserImage,
   browserLimits,
 } from "./browser-container.mjs";
-import { browserSpec, browserSpecText } from "./browser-runner/spec.mjs";
-export async function executeReact(input, id) {
-  const spec = browserSpec(input.code, input.steps),
-    name = "study-browser-run-" + id,
+import { browserSpecText } from "./browser-runner/spec.mjs";
+
+/** Keep the readable form when it fits; never cut a report into invalid JSON unless it cannot fit at all. */
+function observationText(observed, budget) {
+  const pretty = JSON.stringify(observed, null, 2);
+  return boundedText(
+    Buffer.byteLength(pretty) <= budget ? pretty : JSON.stringify(observed),
+    budget,
+  );
+}
+
+/** Runs a spec already validated by browserSpec in the isolated browser container. */
+export async function executeReact(spec, id) {
+  const name = "study-browser-run-" + id,
     marker = "STUDY_REACT_" + id,
     startedAt = new Date().toISOString(),
     start = performance.now(),
@@ -20,24 +38,17 @@ export async function executeReact(input, id) {
       specHash: sha256(browserSpecText(spec.code, spec.steps)),
       limits: { network: "none", hostMounts: false, ...browserLimits },
     };
-  let imageId;
+  let attemptedCreate = false;
   try {
-    const image = await docker([
-      "image",
-      "inspect",
-      process.env.CODE_RUNNER_REACT_IMAGE ?? "study-browser-runtime:0.1.0",
-      "--format",
-      "{{.Id}}",
-    ]);
-    imageId = image.stdout.trim();
-    if (image.exitCode !== 0 || !/^sha256:[a-f0-9]{64}$/.test(imageId))
+    const imageId = await inspectImage(browserImage());
+    if (!imageId)
       return {
         ...base,
         status: "unavailable",
         executed: false,
         detail: "Build the isolated React runtime image first; no code ran.",
       };
-    const created = await docker([
+    const args = [
       "create",
       ...browserContainerOptions(name),
       "-i",
@@ -48,7 +59,10 @@ export async function executeReact(input, id) {
       "14",
       "node",
       "/opt/study-browser/runner.mjs",
-    ]);
+    ];
+    // A killed create can still leave a container behind, so flag it first.
+    attemptedCreate = true;
+    const created = await docker(args);
     if (created.exitCode !== 0)
       return {
         ...base,
@@ -58,16 +72,13 @@ export async function executeReact(input, id) {
         detail:
           "The isolated React container could not start; no learner code ran.",
       };
-    const result = await docker(
-        ["start", "--attach", "--interactive", name],
-        JSON.stringify({ ...spec, marker }) + "\n",
-        browserLimits.wallTimeMs,
-        () => {
-          void docker(["rm", "--force", name]);
-        },
-        browserLimits.outputBytes,
-      ),
-      executed = result.stderrPrefix.split("\n").includes(marker);
+    const result = await docker(["start", "--attach", "--interactive", name], {
+        input: JSON.stringify({ ...spec, marker }) + "\n",
+        timeout: browserLimits.wallTimeMs,
+        onLimit: () => void removeContainer(name),
+        outputLimit: browserLimits.outputBytes,
+      }),
+      executed = sawMarker(result, marker);
     let observed;
     try {
       observed = JSON.parse(result.stdout);
@@ -102,7 +113,7 @@ export async function executeReact(input, id) {
         result.reason ??
         (observed?.timedOut
           ? "timeout"
-          : [124, 137, 152].includes(result.exitCode)
+          : isLimitExit(result.exitCode)
             ? "resource-limit"
             : !executed && !compileError
               ? "unavailable"
@@ -114,10 +125,9 @@ export async function executeReact(input, id) {
       status,
       executed,
       exitCode: result.exitCode,
-      stdout: boundedText(
-        observed ? JSON.stringify(observed, null, 2) : result.stdout,
-        browserLimits.outputBytes,
-      ),
+      stdout: observed
+        ? observationText(observed, browserLimits.outputBytes)
+        : result.stdout,
       stderr: boundedText(result.stderr.replace(marker + "\n", ""), 8192),
       ...(preview ? { preview } : {}),
       detail: compileError
@@ -127,6 +137,6 @@ export async function executeReact(input, id) {
           : undefined,
     };
   } finally {
-    await docker(["rm", "--force", name]);
+    if (attemptedCreate) await removeContainer(name);
   }
 }

@@ -88,6 +88,14 @@ test("infinite code, memory exhaustion and output flooding are bounded and relea
     assert.ok(performance.now() - start < 10000);
     assert.ok(Buffer.byteLength(result.stdout + result.stderr) <= 65536);
   }
+  // Off-heap memory: the cgroup kills the bootstrap's child, which must surface as a limit, not exit 1.
+  const exhausted = await executeCode({
+    language: "typescript",
+    code: "const kept: Buffer[] = []; for (;;) kept.push(Buffer.alloc(16 * 1024 * 1024, 1));",
+  });
+  assert.equal(exhausted.executed, true, JSON.stringify(exhausted));
+  assert.equal(exhausted.status, "resource-limit", JSON.stringify(exhausted));
+  assert.equal(exhausted.exitCode, 137);
   const result = await executeCode({
     language: "python",
     code: "print('recovered')",

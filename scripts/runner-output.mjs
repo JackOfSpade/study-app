@@ -1,5 +1,6 @@
 import { StringDecoder } from "node:string_decoder";
 export function boundedText(value, budget) {
+  if (Buffer.byteLength(value) <= budget) return value;
   let output = "",
     used = 0;
   for (const character of value) {

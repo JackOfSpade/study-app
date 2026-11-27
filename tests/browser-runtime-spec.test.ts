@@ -55,11 +55,18 @@ test("browser check packets cannot introduce arbitrary script evaluation, privil
     ["click", "body"],
   ])
     assert.throws(() => browserSteps([step]));
-  assert.throws(() =>
-    browserSteps(
-      Array.from({ length: 9 }, () => ({ kind: "click", selector: "button" })),
-    ),
+  assert.throws(
+    () =>
+      browserSteps(
+        Array.from({ length: 9 }, () => ({
+          kind: "click",
+          selector: "button",
+        })),
+      ),
+    /at most eight steps/,
   );
+  for (const value of [null, "click", { kind: "click" }])
+    assert.throws(() => browserSteps(value), /must be a list/);
   assert.throws(() => browserSpec("é".repeat(32769)));
   assert.throws(() => browserSpec({ code: "not a string" }));
 });

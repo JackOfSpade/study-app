@@ -27,13 +27,95 @@ const result = {
 };
 let executed = false,
   emitted = false,
-  consoleBytes = 0;
+  consoleChars = 0;
 function phase(name) {
   result.phase = name;
   result.phases.push({ name, elapsedMs: Date.now() - startedAt });
 }
 function short(value, n = 1000) {
   return String(value).slice(0, n);
+}
+/** Resolve only the allowed React modules from the learner's single TSX file. */
+function singleReactModulePlugin(allowed) {
+  return {
+    name: "single-react-module",
+    setup(build) {
+      build.onResolve({ filter: /.*/ }, (args) => {
+        if (args.importer === "/work/Component.tsx") {
+          if (!allowed.has(args.path))
+            return {
+              errors: [
+                {
+                  text: "Only installed React imports are available; this runtime accepts a single TSX module.",
+                },
+              ],
+            };
+          return { path: require.resolve(args.path) };
+        }
+        return undefined;
+      });
+    },
+  };
+}
+/** Serve only the exercise page and its script; record and abort everything else. */
+function offlineRoute(html, script, result) {
+  return async (route) => {
+    const url = new URL(route.request().url());
+    if (
+      url.origin === "http://exercise.invalid" &&
+      route.request().method() === "GET" &&
+      (url.pathname === "/" || url.pathname === "/component.js")
+    ) {
+      await route.fulfill({
+        status: 200,
+        contentType: url.pathname === "/" ? "text/html" : "text/javascript",
+        headers: {
+          "Content-Security-Policy":
+            "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'",
+          "Cache-Control": "no-store",
+        },
+        body: url.pathname === "/" ? html : script,
+      });
+    } else {
+      if (result.blockedRequests.length < 20)
+        result.blockedRequests.push(short(route.request().url(), 200));
+      await route.abort("blockedbyclient");
+    }
+  };
+}
+/** Run one issued check; the entry records whether it passed and why not. */
+async function runStep(page, step) {
+  const entry = { ...step, passed: false },
+    locator = page.locator("css=" + step.selector);
+  try {
+    if (step.kind === "click") await locator.click();
+    if (step.kind === "fill") await locator.fill(step.value);
+    if (step.kind === "press") await locator.press(step.key);
+    if (step.kind === "expect-text" || step.kind === "expect-count") {
+      const end = Date.now() + 800;
+      do {
+        if (step.kind === "expect-text") {
+          await locator.waitFor({ state: "visible" });
+          entry.observed = short((await locator.innerText()).trim(), 2000);
+          if (entry.observed === step.text) {
+            entry.passed = true;
+            break;
+          }
+        } else {
+          entry.observed = await locator.count();
+          if (entry.observed === step.count) {
+            entry.passed = true;
+            break;
+          }
+        }
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      } while (Date.now() < end);
+      if (!entry.passed) throw Error("Observed DOM did not match this check");
+    } else entry.passed = true;
+  } catch (error) {
+    entry.error = short(error.message);
+  }
+  return entry;
 }
 async function emit(exitCode = 0) {
   if (emitted) return;
@@ -47,6 +129,8 @@ async function emit(exitCode = 0) {
   process.exitCode = exitCode;
 }
 const deadline = setTimeout(async () => {
+  // A report already written must keep its exit code and contents.
+  if (emitted) return;
   result.timedOut = true;
   result.errors.push("Browser execution reached its 12-second wall limit.");
   await emit(124);
@@ -104,7 +188,7 @@ try {
     () =>
       compiler.build({
         stdin: {
-          contents: `import React from 'react';import {createRoot} from 'react-dom/client';import {flushSync} from 'react-dom';import App from '/work/Component.tsx';flushSync(()=>createRoot(document.getElementById('root')).render(<App/>));`,
+          contents: `import {createRoot} from 'react-dom/client';import {flushSync} from 'react-dom';import App from '/work/Component.tsx';flushSync(()=>createRoot(document.getElementById('root')).render(<App/>));`,
           loader: "tsx",
           resolveDir: "/opt/study-browser",
         },
@@ -114,27 +198,7 @@ try {
         format: "iife",
         jsx: "automatic",
         logLevel: "silent",
-        plugins: [
-          {
-            name: "single-react-module",
-            setup(build) {
-              build.onResolve({ filter: /.*/ }, (args) => {
-                if (args.importer === "/work/Component.tsx") {
-                  if (!allowed.has(args.path))
-                    return {
-                      errors: [
-                        {
-                          text: "Only installed React imports are available; this runtime accepts a single TSX module.",
-                        },
-                      ],
-                    };
-                  return { path: require.resolve(args.path) };
-                }
-                return undefined;
-              });
-            },
-          },
-        ],
+        plugins: [singleReactModulePlugin(allowed)],
       }),
     () => compiler.stop(),
   );
@@ -167,9 +231,9 @@ try {
       }
       return;
     }
-    if (result.console.length < 40 && consoleBytes < 8000) {
+    if (result.console.length < 40 && consoleChars < 8000) {
       const item = { type: message.type(), text: short(text, 1000) };
-      consoleBytes += item.text.length;
+      consoleChars += item.text.length;
       result.console.push(item);
     }
   });
@@ -180,66 +244,14 @@ try {
       '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Isolated React exercise</title><style>body{margin:16px;font:16px system-ui;background:#fff;color:#111}</style></head><body><div id="root"></div><script src="/component.js"></script></body></html>',
     script = `console.debug(${JSON.stringify(input.marker)});\n${bundled.outputFiles[0].text}`;
   phase("installing-offline-route");
-  await context.route("**/*", async (route) => {
-    const url = new URL(route.request().url());
-    if (
-      url.origin === "http://exercise.invalid" &&
-      route.request().method() === "GET" &&
-      (url.pathname === "/" || url.pathname === "/component.js")
-    ) {
-      await route.fulfill({
-        status: 200,
-        contentType: url.pathname === "/" ? "text/html" : "text/javascript",
-        headers: {
-          "Content-Security-Policy":
-            "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'",
-          "Cache-Control": "no-store",
-        },
-        body: url.pathname === "/" ? html : script,
-      });
-    } else {
-      if (result.blockedRequests.length < 20)
-        result.blockedRequests.push(short(route.request().url(), 200));
-      await route.abort("blockedbyclient");
-    }
-  });
+  await context.route("**/*", offlineRoute(html, script, result));
   phase("loading-exercise");
   await page.goto("http://exercise.invalid/", { waitUntil: "load" });
   phase("running-checks");
   for (const step of spec.steps) {
-    const entry = { ...step, passed: false },
-      locator = page.locator("css=" + step.selector);
-    try {
-      if (step.kind === "click") await locator.click();
-      if (step.kind === "fill") await locator.fill(step.value);
-      if (step.kind === "press") await locator.press(step.key);
-      if (step.kind === "expect-text" || step.kind === "expect-count") {
-        const end = Date.now() + 800;
-        do {
-          if (step.kind === "expect-text") {
-            await locator.waitFor({ state: "visible" });
-            entry.observed = short((await locator.innerText()).trim(), 2000);
-            if (entry.observed === step.text) {
-              entry.passed = true;
-              break;
-            }
-          } else {
-            entry.observed = await locator.count();
-            if (entry.observed === step.count) {
-              entry.passed = true;
-              break;
-            }
-          }
-          await new Promise((resolve) => setTimeout(resolve, 20));
-        } while (Date.now() < end);
-        if (!entry.passed) throw Error("Observed DOM did not match this check");
-      } else entry.passed = true;
-    } catch (error) {
-      entry.error = short(error.message);
-      result.steps.push(entry);
-      break;
-    }
+    const entry = await runStep(page, step);
     result.steps.push(entry);
+    if (!entry.passed) break;
   }
   phase("reading-dom");
   result.domText = short(await page.locator("body").innerText(), 8000);
