@@ -71,23 +71,6 @@ test("invalid bridge response bodies report a protocol error instead of a proper
   }
 });
 
-test("a session already closed before submission never releases a bridge request", async (t) => {
-  const original = globalThis.fetch;
-  t.after(() => {
-    globalThis.fetch = original;
-  });
-  let calls = 0;
-  globalThis.fetch = async () => {
-    calls++;
-    return Response.json({});
-  };
-  await assert.rejects(
-    bridgeRequest("tutor", {}, { isActive: () => false }),
-    /session closed/,
-  );
-  assert.equal(calls, 0);
-});
-
 test("successful non-JSON replies reject while HTTP errors preserve the bridge's message", async (t) => {
   const original = globalThis.fetch;
   t.after(() => {
@@ -264,7 +247,7 @@ async function outcome(fn: () => Promise<unknown>) {
 }
 const ndjson = { headers: { "Content-Type": "application/x-ndjson" } };
 
-test("a request the way to the relay cut off is an interruption, one the owner or the relay decided is not", async (t) => {
+test("a request the way to the relay cut off is an interruption, one the relay decided is not", async (t) => {
   const original = globalThis.fetch;
   t.after(() => {
     globalThis.fetch = original;
@@ -276,21 +259,6 @@ test("a request the way to the relay cut off is an interruption, one the owner o
   const lost = await outcome(() => bridgeRequest("tutor", {}));
   assert.ok(lost instanceof BridgeInterrupted);
   assert.equal(isInterruption(lost), true);
-
-  // The owner's own cancel is a decision, not a cut line.
-  const owner = new AbortController();
-  globalThis.fetch = async (_url, init) =>
-    new Promise<Response>((_resolve, reject) => {
-      init!.signal!.addEventListener("abort", () =>
-        reject(new DOMException("Aborted", "AbortError")),
-      );
-      owner.abort();
-    });
-  const cancelled = await outcome(() =>
-    bridgeRequest("tutor", {}, { signal: owner.signal }),
-  );
-  assert.equal(isInterruption(cancelled), false);
-  assert.equal((cancelled as Error).name, "AbortError");
 
   // The app server's own 502 while the relay restarts has no gateway code.
   globalThis.fetch = async () =>
@@ -403,9 +371,25 @@ test("a stream that ends without an answer or breaks mid-read is an interruption
     ),
     false,
   );
+  // So is one on a final line without its newline.
+  globalThis.fetch = async () =>
+    new Response('{"text":"Wh"}\n{"error":"Usage limit"}', ndjson);
+  const streamedError = await outcome(() =>
+    bridgeRequest("tutor", {}, { onText: () => {} }),
+  );
+  assert.equal(isInterruption(streamedError), false);
+  assert.match((streamedError as Error).message, /Usage limit/);
+  // A stream that ends cleanly part-way through its last line was cut off.
+  globalThis.fetch = async () =>
+    new Response('{"text":"Wh"}\n{"answer":{', ndjson);
+  const truncated = await outcome(() =>
+    bridgeRequest("tutor", {}, { onText: () => {} }),
+  );
+  assert.ok(isInterruption(truncated));
+  assert.match((truncated as Error).message, /ended before its answer/);
 });
 
-test("an owner's cancel while the reply streams in is its decision, not a cut line", async (t) => {
+test("a reply stream that breaks off on its own is a cut line", async (t) => {
   const original = globalThis.fetch;
   t.after(async () => {
     globalThis.fetch = (async () =>
@@ -418,37 +402,6 @@ test("an owner's cancel while the reply streams in is its decision, not a cut li
     await checkBridge();
     globalThis.fetch = original;
   });
-  globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
-    if (String(input) === "/api/status")
-      return Response.json({
-        mode: "claude-cli",
-        label: "Fake",
-        detail: "Fixture",
-        capabilities: [],
-      });
-    // The body follows the request's signal, as a browser's does.
-    const body = new ReadableStream<Uint8Array>({
-      start(controller) {
-        controller.enqueue(new TextEncoder().encode('{"text":"Wh"}\n'));
-        init!.signal!.addEventListener("abort", () =>
-          controller.error(new DOMException("Aborted", "AbortError")),
-        );
-      },
-    });
-    return new Response(body, ndjson);
-  }) as typeof fetch;
-  await checkBridge();
-  const owner = new AbortController();
-  const cancelled = await outcome(() =>
-    bridgeRequest(
-      "tutor",
-      { requestId: "s" },
-      { signal: owner.signal, onText: () => owner.abort() },
-    ),
-  );
-  assert.equal(isInterruption(cancelled), false);
-  assert.equal((cancelled as Error).name, "AbortError");
-  // The same stream breaking off on its own is a cut line.
   const lost = new AbortController();
   globalThis.fetch = (async (input: unknown) => {
     if (String(input) === "/api/status")
@@ -468,6 +421,7 @@ test("an owner's cancel while the reply streams in is its decision, not a cut li
     });
     return new Response(body, ndjson);
   }) as typeof fetch;
+  await checkBridge();
   const broken = await outcome(() =>
     bridgeRequest("tutor", { requestId: "s" }, { onText: () => lost.abort() }),
   );

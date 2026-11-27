@@ -7,7 +7,6 @@
  * each part ended. A finished question shows every part.
  */
 import { stagedParts } from "../scripts/lib/question-parts.mjs";
-import { escapeHtml as escape } from "./html";
 import { markdownToHtml } from "./markdown";
 import type { Encounter } from "./model";
 
@@ -65,11 +64,14 @@ export function advancePart(e: Open & Pick<Encounter, "tutor">) {
   return true;
 }
 
+const partDoneHeader = (part: number, of: number) =>
+  `<strong>✓ Part ${part} of ${of} answered</strong>`;
+
 /** The offer that ends the conversation once the open part is confirmed. */
 export function nextPartOffer(e: Open): string {
   const open = openPart(e);
   if (!open || !nextPartReady(e)) return "";
-  return `<div class="message-complete message-part next-part"><strong>✓ Part ${open.part} of ${open.of} answered</strong><span>Ask anything more about it here, or move on.</span><button type="button" data-next-part>Next part</button></div>`;
+  return `<div class="message-complete message-part next-part">${partDoneHeader(open.part, open.of)}<span>Ask anything more about it here, or move on.</span><button type="button" data-next-part>Next part</button></div>`;
 }
 
 const partHtml = (
@@ -119,9 +121,7 @@ export function partMarkers(e: Staged): Map<number, string> {
     .forEach((seq, i) =>
       markers.set(
         seq,
-        `<div class="message-complete message-part"><strong>✓ Part ${i + 1} of ${of} answered</strong><span>${escape(
-          `Part ${i + 2} follows.`,
-        )}</span></div>`,
+        `<div class="message-complete message-part">${partDoneHeader(i + 1, of)}<span>Part ${i + 2} follows.</span></div>`,
       ),
     );
   return markers;

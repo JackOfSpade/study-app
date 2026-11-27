@@ -14,7 +14,7 @@ import { encounterGaps, gapsClosedBy, probeSummary } from "./knowledge-probe";
 import { encounterKey } from "./learner";
 import { markdownToHtml } from "./markdown";
 import { advancePart, nextPartOffer, partMarkers } from "./question-parts";
-import { settleTutorRequest } from "./run-learning";
+import { supersedeInterrupted } from "./run-learning";
 import type { Encounter, StudyRecord, Roadmap } from "./model";
 
 /** What the question's conversation partner is called. */
@@ -193,9 +193,7 @@ export function createTerminalPanels(host: TerminalPanelHost) {
       next.onclick = () => {
         if (!advancePart(e)) return;
         // A request interrupted on the part just left is not retried on the next.
-        for (const job of e.tutorRequests ?? [])
-          if (job.state === "interrupted")
-            settleTutorRequest(job, "superseded");
+        supersedeInterrupted(e);
         delete e.error;
         host.persist();
         host.render();
