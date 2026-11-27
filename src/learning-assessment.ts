@@ -2,7 +2,13 @@ import { isProvider } from "./model";
 import { bridgeRequest, isInterruption, status } from "./bridge-client";
 import { evidencePacket, syncLearningView } from "./curriculum";
 import { applyLearningAssessment, encounterKey } from "./learner";
-import type { Assessment, Encounter, StudyRecord, Roadmap } from "./model";
+import type {
+  Assessment,
+  Encounter,
+  Provider,
+  StudyRecord,
+  Roadmap,
+} from "./model";
 import { studyEvent } from "./study-events";
 
 const connected = (g: StudyRecord) =>
@@ -25,14 +31,13 @@ export async function assess(
   cutoff?: number,
   retry = false,
 ) {
-  const latest = () =>
-    g.study.assessments.filter((a) => a.encounter === e.id).at(-1);
-  const before = latest()?.status;
+  // The record this cutoff settles, and its status before this call.
+  const ref: Settled = {};
   try {
-    await runAssessment(g, e, r, cutoff, retry);
+    await runAssessment(g, e, r, cutoff, retry, ref);
   } finally {
-    const a = latest();
-    if (a && a.status !== "pending" && (retry || a.status !== before))
+    const a = ref.a;
+    if (a && a.status !== "pending" && (retry || a.status !== ref.before))
       studyEvent("assessment-settled", {
         encounter: e.id,
         assessment: a.id,
@@ -43,6 +48,7 @@ export async function assess(
       });
   }
 }
+type Settled = { a?: Assessment; before?: Assessment["status"] };
 /** An assessment reviews one immutable cutoff, even across reloads and retries. */
 async function runAssessment(
   g: StudyRecord,
@@ -51,6 +57,7 @@ async function runAssessment(
   cutoff = e.submissions.find((s) => s.id === e.accepted)?.seq ??
     latestHumanSequence(e),
   retry = false,
+  ref: Settled = {},
 ) {
   const acceptedCutoff = cutoff;
   cutoff = e.history.reduce(
@@ -61,6 +68,8 @@ async function runAssessment(
   const study = g.study,
     id = `assessment-${encounterKey(e)}-${cutoff}`,
     prior = study.assessments.find((a) => a.id === id);
+  ref.a = prior;
+  ref.before = prior?.status;
   if (
     prior &&
     (prior.status === "applied" || !retry || prior.status === "pending")
@@ -76,52 +85,60 @@ async function runAssessment(
     status: "pending",
     provenance: status().mode,
   };
+  ref.a = a;
   if (!prior) study.assessments.push(a);
   else a.status = "pending";
   delete a.resume;
-  const external = study.learner?.attempts.find(
-    (v) =>
-      v.encounter === encounterKey(e) && v.status === "externally-resolved",
-  );
-  if (
-    external &&
-    !e.history.some(
-      (h) =>
-        h.author === "human" &&
-        ["edit", "reasoning", "test", "execution"].includes(h.kind) &&
-        !external.externalResolution!.assessedHumanSequences.includes(h.seq) &&
-        h.seq <= cutoff,
-    ) &&
-    !e.executions?.some(
-      (j) =>
-        j.author === "human" && j.status === "finished" && j.receipt?.executed,
-    )
-  ) {
-    a.status = "review-required";
-    a.provenance =
-      "Attempt resolved in the imported roadmap. Local work is retained; completing it adds no duplicate academic assessment or visit.";
-    return;
-  }
-  if (!e.problem) {
-    a.status = "review-required";
-    a.provenance =
-      "No persisted human learning task was issued. No academic credit.";
-    return;
-  }
-  if (!isProvider(e.problem.provenance) || study.profile !== "live") {
-    a.status = "review-required";
-    a.provenance = "Development simulation cannot award academic credit.";
-    return;
-  }
   try {
+    const external = study.learner?.attempts.find(
+      (v) =>
+        v.encounter === encounterKey(e) && v.status === "externally-resolved",
+    );
+    if (
+      external &&
+      !e.history.some(
+        (h) =>
+          h.author === "human" &&
+          ["edit", "reasoning", "test", "execution"].includes(h.kind) &&
+          !external.externalResolution!.assessedHumanSequences.includes(
+            h.seq,
+          ) &&
+          h.seq <= cutoff,
+      ) &&
+      !e.executions?.some(
+        (j) =>
+          j.author === "human" &&
+          j.status === "finished" &&
+          j.receipt?.executed,
+      )
+    ) {
+      a.status = "review-required";
+      a.provenance =
+        "Attempt resolved in the imported roadmap. Local work is retained; completing it adds no duplicate academic assessment or visit.";
+      return;
+    }
+    if (!e.problem) {
+      a.status = "review-required";
+      a.provenance =
+        "No persisted human learning task was issued. No academic credit.";
+      return;
+    }
+    if (!isProvider(e.problem.provenance) || study.profile !== "live") {
+      a.status = "review-required";
+      a.provenance = "Development simulation cannot award academic credit.";
+      return;
+    }
     const learner = study.learner;
     if (!learner)
       throw Error("Live learner ledger is missing; refusing to reset progress");
+    const provenance = e.problem.provenance;
+    const provider: Provider = connected(g)
+      ? "claude-cli"
+      : provenance === "chatgpt-handoff" || provenance === "claude-cli"
+        ? provenance
+        : "study-mode";
     a.request ??= {
-      provider: ((mode) =>
-        mode === "chatgpt-handoff" || mode === "claude-cli"
-          ? mode
-          : "study-mode")(connected(g) ? status().mode : e.problem.provenance),
+      provider,
       payloadJson: JSON.stringify({
         requestId: id,
         packet: evidencePacket(e, r, cutoff, learner, acceptedCutoff),

@@ -98,7 +98,7 @@ export interface LearningEvidence {
   objectiveId: string;
   depth: number;
   facet: string;
-  outcome: string;
+  outcome: FacetProof["outcome"];
   assistance?: "hinted" | "given";
   artifactSequences: number[];
   helpMessageIds: string[];
@@ -132,7 +132,8 @@ export interface LearningAttempt {
   endedAt?: string;
   parentAttempt?: string;
 }
-interface TrackState {
+export type CareerFocus = "product-feature-owner" | "full";
+export interface TrackState {
   tier: number;
   cleared: number;
   phase: string;
@@ -153,7 +154,11 @@ export interface LearnerLedger {
   cycleOffset?: number;
   /** Completed human questions; scheduling only, never proof or a served visit. */
   studyTurnPosition?: number;
-  careerFocus?: "product-feature-owner" | "full";
+  careerFocus?: CareerFocus;
+  /** The full-profile PE cursor saved while a role focus is active. */
+  careerFullTrack?: TrackState;
+  /** A formal contract issued before a focus switch, valid at this ledger version. */
+  careerCarryover?: { ledgerVersion: number; contract: Contract };
   cells: Record<string, LearningCell>;
   finalProgress?: Record<string, FinalProgress>;
   historicalReviews?: HistoricalFacetReview[];
@@ -217,7 +222,18 @@ export const studyRatioPosition = (s: {
   studyTurnPosition?: number;
 }) => s.studyTurnPosition ?? (s.cycle + (s.cycleOffset ?? 0)) % 3;
 
-const FACET_OUTCOMES: readonly FacetProof["outcome"][] = [
+/** Which study track each position of the PY/PE/PE study ratio serves. */
+export const STUDY_RATIO = ["PY", "PE", "PE"] as const;
+export const ratioTrack = (s: Parameters<typeof studyRatioPosition>[0]) =>
+  STUDY_RATIO[studyRatioPosition(s)];
+/** History kinds that count as human-authored technical work. */
+export const HUMAN_TECHNICAL_KINDS: readonly string[] = [
+  "edit",
+  "reasoning",
+  "test",
+];
+
+export const FACET_OUTCOMES: readonly FacetProof["outcome"][] = [
   "independent",
   "assisted",
   "unknown",

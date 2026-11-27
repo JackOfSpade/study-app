@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { assess, checkBridge, edit } from "../src/ai";
 import { eligible, evidencePacket, initialStudy } from "../src/curriculum";
+import { encounterKey } from "../src/learner";
 import { resumableAssessments } from "../src/resume-work";
 import type { Roadmap } from "../src/model";
 import { decode, encode, recover } from "../src/persistence";
@@ -427,4 +428,44 @@ test("an assessment loading found pending, or an earlier build left unresolved b
   } finally {
     await bridge.restore();
   }
+});
+
+test("a retried older cutoff reports its own assessment to diagnostics", async () => {
+  const { g, e, r } = fixture(),
+    settled: Record<string, unknown>[] = [];
+  watchStudyEvents((type, data) => {
+    if (type === "assessment-settled") settled.push(data);
+  });
+  try {
+    // Offline: each cutoff is captured and left for retry.
+    await assess(g, e, r);
+    edit(g, e, "A later synthetic answer", e.revision, r);
+    await assess(g, e, r);
+    const [older, newer] = g.study.assessments;
+    assert.notEqual(older.id, newer.id);
+    settled.length = 0;
+    await assess(g, e, r, older.evidenceCutoffSequence, true);
+    assert.deepEqual(
+      settled.map((s) => [s.assessment, s.status, s.retry]),
+      [[older.id, "review-required", true]],
+    );
+  } finally {
+    watchStudyEvents(undefined);
+  }
+});
+
+test("a malformed externally resolved attempt settles for review instead of staying pending", async () => {
+  const { g, e, r } = fixture();
+  g.study.learner!.attempts.push({
+    id: "S0099-A1",
+    session: "S0099",
+    encounter: encounterKey(e),
+    contract: structuredClone(e.problem!.contract),
+    status: "externally-resolved",
+    startedAt: "2026-10-15T16:00:00.000Z",
+  });
+  await assess(g, e, r);
+  const a = g.study.assessments[0];
+  assert.equal(a.status, "review-required");
+  assert.match(a.provenance, /Assessment unresolved/);
 });

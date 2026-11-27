@@ -146,3 +146,13 @@ test("each cause of a lost connection gets its own steps", () => {
   assert.deepEqual(commands("gateway-off"), ["npm run bridge:start"]);
   assert.deepEqual(commands(), ["npm run bridge:start"]);
 });
+
+test("moving to live keeps the full profile its ledger recorded", () => {
+  const g = createRecord(42, roadmap);
+  preparePracticeRooms(g, roadmap);
+  delete g.study.careerFocus;
+  g.study.learner!.careerFocus = "full";
+  moveToLiveStudy(g, roadmap);
+  assert.equal(g.study.careerFocus, "full");
+  assert.equal(g.study.learner!.careerFocus, "full");
+});

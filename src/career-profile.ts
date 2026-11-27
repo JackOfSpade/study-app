@@ -1,6 +1,7 @@
-import type { LearnerLedger } from "./learning-model";
+import type { CareerFocus, LearnerLedger } from "./learning-model";
 import type { Contract, Objective, Roadmap, StudyState } from "./model";
-import { reconcileGates, restoreFullQueues } from "./learner";
+import { restoreFullQueues, settleGates } from "./learner";
+export type { CareerFocus } from "./learning-model";
 
 /**
  * Reversible career-focus profile. "product-feature-owner" narrows the PE
@@ -8,9 +9,7 @@ import { reconcileGates, restoreFullQueues } from "./learner";
  * "full" (or undefined) is the original curriculum. Source definitions,
  * objective targets/cells, ledger evidence and reviews are never changed.
  */
-export type CareerFocus = "product-feature-owner" | "full";
 type CareerPriority = "core" | "reference" | "optional";
-type Focusable = { careerFocus?: CareerFocus };
 
 const ROLE_MAX_PE_DEPTH = 3;
 const CAREER_FOCUS_LABELS: Record<CareerFocus, string> = {
@@ -121,15 +120,17 @@ const CORE = new Set(CORE_IDS),
   REFERENCE = new Set(REFERENCE_IDS);
 
 /** The focus recorded on a ledger or study state; undefined means full. */
-export const focusOf = (x: Focusable | undefined): CareerFocus | undefined =>
-  x?.careerFocus;
+export const focusOf = (
+  x: { careerFocus?: CareerFocus } | undefined,
+): CareerFocus | undefined => x?.careerFocus;
 export const roleFocused = (focus?: CareerFocus) =>
   focus === "product-feature-owner";
 /** Focus governing scheduling for a study state: the live ledger's, else the study's. */
 export const studyFocus = (s: StudyState): CareerFocus | undefined =>
-  s.profile === "live" && s.learner
-    ? focusOf(s.learner as Focusable)
-    : focusOf(s as Focusable);
+  s.profile === "live" && s.learner ? focusOf(s.learner) : focusOf(s);
+/** The focus a saved study chose: its own, else its ledger's, else the role profile. */
+export const savedCareerFocus = (s: StudyState): CareerFocus =>
+  s.careerFocus ?? s.learner?.careerFocus ?? "product-feature-owner";
 
 /** Priority of an objective under the role profile. PY is always core. */
 export function careerPriority(id: string): CareerPriority {
@@ -214,32 +215,25 @@ export function activateCareerFocus(
   s: StudyState,
   focus: CareerFocus = "product-feature-owner",
 ) {
-  (s as Focusable).careerFocus = focus;
+  s.careerFocus = focus;
   const l = s.learner;
   if (!l) return s;
-  const ledger = l as LearnerLedger & Focusable;
-  const previous = ledger.careerFocus;
+  const previous = l.careerFocus;
   if (previous === focus) {
-    reconcileGates(r, l);
+    settleGates(r, l);
     return s;
   }
   // Only a question actually bound to a visit can be carried. Merely asking
   // the scheduler what would come next must not issue the pre-focus question.
   const carried = s.pending?.contract;
   if (focus === "product-feature-owner" && !roleFocused(previous))
-    (
-      ledger as LearnerLedger & {
-        careerFullTrack?: LearnerLedger["tracks"]["PE"];
-      }
-    ).careerFullTrack = structuredClone(ledger.tracks.PE);
-  ledger.careerFocus = focus;
-  const carry = l as LearnerLedger & {
-    careerCarryover?: { ledgerVersion: number; contract: Contract };
-  };
+    l.careerFullTrack = structuredClone(l.tracks.PE);
+  l.careerFocus = focus;
   if (carried)
-    carry.careerCarryover = { ledgerVersion: l.version, contract: carried };
-  else delete carry.careerCarryover;
+    l.careerCarryover = { ledgerVersion: l.version, contract: carried };
+  else delete l.careerCarryover;
+  // A restored full cursor may trail tiers that focused work already cleared.
   if (!roleFocused(focus)) restoreFullQueues(r, l);
-  reconcileGates(r, l);
+  settleGates(r, l);
   return s;
 }

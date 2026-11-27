@@ -9,6 +9,7 @@ import type {
   KnowledgeProbe,
 } from "./knowledge-probe";
 import type {
+  CareerFocus,
   HistoricalFacetMapping,
   LearnerLedger,
   ReviewRecord,
@@ -128,7 +129,7 @@ export interface StudyState {
   /** Facets established in conversation (answered or implied); never mastery. */
   knowledgeEstablished?: KnowledgeEstablishedRecord[];
   profile?: "development" | "live";
-  careerFocus?: "product-feature-owner" | "full";
+  careerFocus?: CareerFocus;
   learner?: LearnerLedger;
   version: number;
   cycle: number;

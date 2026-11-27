@@ -171,12 +171,7 @@ export function recordTopicAssessments(
     return [{ key, record }];
   });
   if (!staged.length) return;
-  if (
-    !g.study.topicAssessments ||
-    typeof g.study.topicAssessments !== "object" ||
-    Array.isArray(g.study.topicAssessments)
-  )
-    g.study.topicAssessments = {};
+  if (!isRecord(g.study.topicAssessments)) g.study.topicAssessments = {};
   for (const { key, record } of staged) g.study.topicAssessments[key] = record;
 }
 
@@ -234,7 +229,8 @@ function boundedText(text: string, maxChars: number) {
 const topicOf = (id: string) => /^(PY|PE):[TXI]\d{2}/.exec(id)?.[0];
 const onTopics = (ids: readonly string[], topics: readonly string[]) =>
   ids.some((id) => topics.includes(topicOf(id) ?? ""));
-const encounterKey = (g: StudyRecord, e: Encounter) =>
+/** Run-scoped encounter identity; a run without its own id belongs to the record. */
+const runEncounterKey = (g: StudyRecord, e: Encounter) =>
   `${e.runId ?? g.id}/${e.id}`;
 
 /** This is saved in the immutable request before the current native conversation begins. */
@@ -347,7 +343,7 @@ export function topicAssessmentContext(
   });
   const encounters = new Map<string, Encounter>();
   for (const e of [...Object.values(g.encounters), ...g.study.archives]) {
-    const key = encounterKey(g, e);
+    const key = runEncounterKey(g, e);
     if (!encounters.has(key)) encounters.set(key, e);
   }
   const conversations = [...encounters.values()]

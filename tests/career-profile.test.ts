@@ -175,6 +175,38 @@ test("focused PE finishes at depth3, preserves PY4 and full readiness, and full 
   );
 });
 
+test("a restored full PE cursor whose head was cleared while focused still schedules PE", () => {
+  const s = initialStudy(r, "live"),
+    l = s.learner!;
+  l.reviews = {};
+  l.cycleOffset = 1;
+  activateCareerFocus(r, s);
+  assert.deepEqual(l.careerFullTrack?.queue, ["X09"]);
+  for (const o of r.tracks.PE.objectives)
+    if (o.id.startsWith("PE:X09.")) l.cells[o.id].states[0] = "P";
+  activateCareerFocus(r, s, "full");
+  assert.deepEqual(l.tracks.PE.queue, ["X09"], "the full cursor is restored");
+  const c = eligibleLearning(r, l, at);
+  assert.equal(c.track, "PE");
+  assert.doesNotMatch(c.objectiveIds[0], /^PE:X09\./);
+  assert.equal(c.scheduleNote, undefined);
+});
+test("returning to the full profile settles every tier that focused evidence already clears", () => {
+  const s = initialStudy(r, "live"),
+    l = s.learner!;
+  l.reviews = {};
+  activateCareerFocus(r, s);
+  assert.equal(l.careerFullTrack?.tier, 1);
+  // Isolated planner cells, never exported as learner evidence.
+  for (const t of ["PY", "PE"] as const)
+    for (const o of r.tracks[t].objectives)
+      for (let d = 1; d <= Math.min(o.target, 3); d++)
+        l.cells[o.id].states[d - 1] = "P";
+  activateCareerFocus(r, s, "full");
+  assert.equal(l.tracks.PE.cleared, 3);
+  assert.equal(l.tracks.PE.tier, 4);
+  assert.equal(l.tracks.PY.tier, 4);
+});
 test("new probes are bounded to one prerequisite level and scope guidance excludes protocol trivia", () => {
   const c = { track: "PE" as const, objectiveIds: ["PE:T04.1"], depth: 1 };
   assert.match(
