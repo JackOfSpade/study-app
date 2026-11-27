@@ -219,7 +219,7 @@ export class RunLogs {
         this.error = "";
       } catch {
         this.error =
-          "Diagnostics could not be saved. Download them before closing.";
+          "Diagnostics could not be saved. File a bug report before closing to keep them.";
       }
     });
     return this.queue;
@@ -239,9 +239,9 @@ function restoredRun(value: unknown): RunLog | undefined {
     return;
   const entries: Entry[] = [];
   for (const e of value.entries.slice(-LOG_LIMITS.entries))
-    // Entries stamped with a number came from the record's old clock: the
-    // an earlier build's bulky state dumps, and later entries that all carry the
-    // same frozen value. They are dropped so they cannot crowd out a report.
+    // Entries stamped with a number came from the record's old clock (an
+    // earlier build's bulky state dumps, and later entries frozen at one
+    // value); they are dropped so they cannot crowd out a report.
     if (
       isRecord(e) &&
       typeof e.at === "string" &&

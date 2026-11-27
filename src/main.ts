@@ -25,7 +25,14 @@ import {
 import { connectionSteps } from "./connection-steps";
 import { initialStudy, syncLearningView } from "./curriculum";
 import { displayScale } from "./display-scale";
-import { $, setHtml, setNodeText, setText } from "./dom";
+import {
+  $,
+  download,
+  formatElapsed,
+  setHtml,
+  setNodeText,
+  setText,
+} from "./dom";
 import { executionText } from "./execution-presentation";
 import studyShell from "./study-shell.html?raw";
 import { escapeHtml as escape } from "./html";
@@ -40,7 +47,6 @@ import { nextPartReady, openPart, questionHtml } from "./question-parts";
 import type { Encounter, StudyRecord, Roadmap } from "./model";
 import {
   decode,
-  download,
   encode,
   exportRecoveryBackup,
   load,
@@ -76,7 +82,11 @@ const app = $("#app");
 const serverBuild = () =>
   fetch("/_app-health", { signal: AbortSignal.timeout(3000) })
     .then((r) => r.json())
-    .then((health) => String(health.build).slice(0, 16))
+    .then((health) =>
+      typeof health?.build === "string" && health.build
+        ? health.build.slice(0, 16)
+        : undefined,
+    )
     .catch(() => undefined);
 /** The build this page loaded with: asked once, as the page starts. */
 const loadedBuild = serverBuild();
@@ -86,7 +96,6 @@ let studyRecord: StudyRecord,
   saveRecoveryError = "",
   /** The encounter open in the terminal, if any. */
   active: string | undefined,
-  lastUI = 0,
   /** The learner's latest question, open or still being prepared. */
   lastQuestion: string | undefined;
 try {
@@ -97,15 +106,18 @@ try {
   saveRecoveryError = `Saved progress could not be loaded: ${String(err)}. Existing checkpoints have been protected. Retry loading, or export recovery data before restoring a backup.`;
   saveError = saveRecoveryError;
 }
+/** The question open in the terminal, if it is still in the record. */
+const openEncounter = () =>
+  active ? studyRecord.encounters[active] : undefined;
 /** The save is one record holding the learning state, its questions and the
  * settings. A first visit starts from an empty one. */
 function newSave() {
   const study = initialStudy(roadmap, "live");
-  activateRunFocus(study);
+  applyCareerFocus(study);
   return emptyRecord(study);
 }
 /** Apply the saved role profile, or the default one, to a study state. */
-function activateRunFocus(study: StudyRecord["study"]) {
+function applyCareerFocus(study: StudyRecord["study"]) {
   activateCareerFocus(
     roadmap,
     study,
@@ -113,7 +125,7 @@ function activateRunFocus(study: StudyRecord["study"]) {
   );
 }
 moveToLiveStudy(studyRecord, roadmap);
-activateRunFocus(studyRecord.study);
+applyCareerFocus(studyRecord.study);
 function latestStudyEncounter(g: StudyRecord): string | undefined {
   const saved = g.lastStudyEncounter && g.encounters[g.lastStudyEncounter];
   if (
@@ -221,6 +233,20 @@ async function persist() {
 }
 async function persistOrThrow(context = "Local save failed") {
   if (!(await persist())) throw Error(saveError || context);
+}
+/** A save encodes the whole record, so a typed draft is saved once the
+ * learner pauses; leaving the field, the question or the page saves at once. */
+const DRAFT_SAVE_MS = 500;
+let draftSaveTimer: ReturnType<typeof setTimeout> | undefined;
+function saveDraftSoon() {
+  clearTimeout(draftSaveTimer);
+  draftSaveTimer = setTimeout(() => void persistNow(), DRAFT_SAVE_MS);
+}
+/** Save now, in place of any draft save still waiting. */
+function persistNow() {
+  clearTimeout(draftSaveTimer);
+  draftSaveTimer = undefined;
+  return persist();
 }
 
 // ---- The learner's question ------------------------------------------------
@@ -418,12 +444,13 @@ window.addEventListener("keydown", (ev) => {
     lessonSurface.close();
     return;
   }
-  // Escape opens the menu; the dialog's cancel event closes it again.
+  // Escape opens the menu; the dialog's cancel event closes it again. Any
+  // other open dialog (the bug report) closes on its own cancel instead.
   if (
     studyRecord.studyWorkspace?.enabled &&
     ev.code === "Escape" &&
     !ev.repeat &&
-    !$<HTMLDialogElement>("#menu").open &&
+    !document.querySelector("dialog[open]") &&
     performance.now() - studyMenuClosedAt > 200
   ) {
     ev.preventDefault();
@@ -432,10 +459,9 @@ window.addEventListener("keydown", (ev) => {
 });
 $("#save-button").onclick = async () => {
   await persist();
-  studyRecord.notice =
+  $("#menu-save-status").textContent =
     saveError ||
-    "Run saved locally. Export a backup from Settings to move between browsers.";
-  $("#menu-save-status").textContent = studyRecord.notice;
+    "Progress saved locally. Export a backup from Settings to move between browsers.";
 };
 function renderCareerControls() {
   const profile = careerProfileSummary(roadmap, studyRecord.study);
@@ -509,10 +535,6 @@ $("#reconnect").onclick = () => {
 
 $("#export").onclick = () =>
   download("learning-workspace-backup.json", encode(studyRecord));
-$("#import").onchange = async () => {
-  const file = $<HTMLInputElement>("#import").files?.[0];
-  if (file) await restoreRunBackup(file);
-};
 $("#save-recovery-retry").onclick = () => window.location.reload();
 $("#save-recovery-export").onclick = async () => {
   try {
@@ -524,17 +546,22 @@ $("#save-recovery-export").onclick = async () => {
     );
   }
 };
-$("#save-recovery-import").onchange = async () => {
-  const file = $<HTMLInputElement>("#save-recovery-import").files?.[0];
-  if (file) await restoreRunBackup(file);
-};
+// Cleared at once, so choosing the same file again (after a failed import)
+// still fires a change.
+for (const id of ["#import", "#save-recovery-import"])
+  $(id).onchange = async () => {
+    const input = $<HTMLInputElement>(id);
+    const file = input.files?.[0];
+    input.value = "";
+    if (file) await restoreBackup(file);
+  };
 /** Replace everything in this tab with a backup file's record. */
-async function restoreRunBackup(file: File) {
+async function restoreBackup(file: File) {
   setText("#import-status", "");
   try {
     const next = recover(decode(await file.text()));
     moveToLiveStudy(next, roadmap);
-    activateRunFocus(next.study);
+    applyCareerFocus(next.study);
     lessonSurface.close();
     closeTerminal();
     studyRecord = next;
@@ -543,21 +570,16 @@ async function restoreRunBackup(file: File) {
     resumeQuestions();
     syncDisplayScale();
     if (!(await persist())) {
-      studyRecord.notice =
-        "Import opened in this tab but could not be saved. Export a full backup before leaving, then retry the import when storage works.";
-      const message = `${studyRecord.notice} ${saveError}`;
+      const message = `Import opened in this tab but could not be saved. Export a full backup before leaving, then retry the import when storage works. ${saveError}`;
       setText("#import-status", message);
       setText("#save-recovery-status", message);
     }
     showStudy();
   } catch (err) {
-    studyRecord.notice = `Import rejected: ${String(err)}`;
-    setText("#import-status", studyRecord.notice);
+    const message = `Import rejected: ${String(err)}`;
+    setText("#import-status", message);
     if (saveRecoveryError)
-      setText(
-        "#save-recovery-status",
-        `${saveRecoveryError} ${studyRecord.notice}`,
-      );
+      setText("#save-recovery-status", `${saveRecoveryError} ${message}`);
   }
 }
 
@@ -608,9 +630,7 @@ function showStudy() {
 mountBugReport({
   log: logEvent,
   async collect() {
-    const e =
-      (active ? studyRecord.encounters[active] : undefined) ??
-      workspaceSelectedQuestion(studyRecord);
+    const e = openEncounter() ?? workspaceSelectedQuestion(studyRecord);
     const shown = (selector: string) => {
       const node = document.querySelector<HTMLElement>(selector);
       return node && !node.hidden ? (node.textContent ?? "").trim() : "";
@@ -699,13 +719,11 @@ window.addEventListener("unhandledrejection", (event) => {
 // ---- The terminal: one question and its conversation -----------------------
 
 function closeTerminal() {
-  if (active) {
-    const e = studyRecord.encounters[active];
-    if (e) e.chatOpen = false;
-  }
+  const e = openEncounter();
+  if (e) e.chatOpen = false;
   active = undefined;
   $("#terminal").hidden = true;
-  void persist();
+  void persistNow();
 }
 /** Opens a question in the workspace's terminal. */
 function openStudyTerminal(e: Encounter) {
@@ -773,7 +791,7 @@ function startGapTest(gap: KnowledgeGapRecord): string | undefined {
 const connectionLocked = (e: Encounter) =>
   status().mode !== "claude-cli" && e.state !== "consumed";
 const terminalConnectionLocked = () => {
-  const e = active ? studyRecord.encounters[active] : undefined;
+  const e = openEncounter();
   return !!e && connectionLocked(e);
 };
 const LOCKED_CONNECTION_POLL_MS = 2500;
@@ -786,7 +804,7 @@ function recheckConnection() {
     await checkBridge();
     connectionCheckedAt = performance.now();
     connectionChecking = undefined;
-    const e = active ? studyRecord.encounters[active] : undefined;
+    const e = openEncounter();
     if (!e) return;
     if (lockedId === e.id && !connectionLocked(e))
       void startConnectedQuestion(e);
@@ -839,6 +857,7 @@ const GENERATION_STEPS = [
   "Checking the problem against your roadmap",
   "Opening it in this terminal",
 ];
+/** When each generation was first seen, for a request saved without a start. */
 const generationSeen = new Map<string, number>();
 /** Live stages and elapsed time while Claude writes this terminal's question.
  * The request is a single call, so the stages are the client's own. */
@@ -852,8 +871,7 @@ function generationHtml(e: Encounter) {
     started = progress?.startedAt ?? Date.now();
     generationSeen.set(source.generation, started);
   }
-  const seconds = Math.max(0, Math.floor((Date.now() - started) / 1000));
-  const clock = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+  const elapsed = Date.now() - started;
   const current = phase === "checking" ? 2 : 1;
   const steps = GENERATION_STEPS.map((label, i) => {
     const text =
@@ -863,20 +881,23 @@ function generationHtml(e: Encounter) {
     const state = i < current ? "done" : i === current ? "active" : "todo";
     return `<li class="${state}">${escape(text)}</li>`;
   }).join("");
-  return `<div class="generation-progress" role="status"><div class="generation-bar" aria-hidden="true"><span></span></div><ol class="generation-steps">${steps}</ol><p class="generation-elapsed">Elapsed <strong>${clock}</strong>${seconds >= 60 ? " · Still working: a validated problem can take a few minutes." : ""}</p><p class="generation-note">You can leave immediately; the request is saved.</p></div>`;
+  // This markup is rewritten every second as the clock moves, so it is not a
+  // live region, and the clock itself is not read out.
+  return `<div class="generation-progress"><div class="generation-bar" aria-hidden="true"><span></span></div><ol class="generation-steps">${steps}</ol><p class="generation-elapsed"><span aria-hidden="true">Elapsed <strong>${formatElapsed(elapsed)}</strong></span>${elapsed >= 60_000 ? " · Still working: a validated problem can take a few minutes." : ""}</p><p class="generation-note">You can leave immediately; the request is saved.</p></div>`;
 }
 const terminalPanels = createTerminalPanels({
   studyRecord: () => studyRecord,
   roadmap,
+  openEncounter,
   persist,
   render: () => renderTerminal(),
   settle: settleTerminalRequest,
 });
 watchStreamingReplies(() => renderTerminal());
 function renderTerminal(force = false) {
-  if (!active || $("#terminal").hidden) return;
-  const e = studyRecord.encounters[active];
+  if ($("#terminal").hidden) return;
   // A replaced record may no longer hold the question that was open.
+  const e = openEncounter();
   if (!e) return;
   const locked = connectionLocked(e);
   $("#terminal-connect").hidden = !locked;
@@ -1021,17 +1042,17 @@ function settleTerminalRequest(pending: Promise<unknown>, e: Encounter) {
 }
 /** Start a request for the open question, then save and show its pending state. */
 function startTerminalRequest(start: (e: Encounter) => Promise<unknown>) {
-  const e = active ? studyRecord.encounters[active] : undefined;
+  const e = openEncounter();
   if (!e) return;
   settleTerminalRequest(start(e), e);
   renderTerminal();
-  void persist();
+  void persistNow();
 }
 $("#terminal-connect-retry").onclick = () => void recheckConnection();
 // Answers to the tutor's one warning. Only the accept button unlocks a hint;
 // a typed reply is judged as a new attempt.
 $("#help-accept").onclick = () => {
-  const e = active ? studyRecord.encounters[active] : undefined;
+  const e = openEncounter();
   const facets = e ? offeredHelp(e).length : 0;
   if (!e || !facets) return;
   // The one action that changes how a part is credited: counted, never named.
@@ -1042,7 +1063,7 @@ $("#help-accept").onclick = () => {
 };
 $("#help-retry").onclick = () => $<HTMLTextAreaElement>("#chat-input").focus();
 $("#help-skip").onclick = () => {
-  const e = active ? studyRecord.encounters[active] : undefined;
+  const e = openEncounter();
   const facets = e ? offeredHelp(e).length : 0;
   if (!e || !facets) return;
   logEvent("help-offer-answered", { answer: "move-on", facets });
@@ -1051,10 +1072,13 @@ $("#help-skip").onclick = () => {
   );
 };
 $("#chat-input").addEventListener("input", () => {
-  if (!active) return;
-  studyRecord.encounters[active].chatDraft =
-    $<HTMLTextAreaElement>("#chat-input").value;
-  void persist();
+  const e = openEncounter();
+  if (!e) return;
+  e.chatDraft = $<HTMLTextAreaElement>("#chat-input").value;
+  saveDraftSoon();
+});
+$("#chat-input").addEventListener("blur", () => {
+  if (draftSaveTimer !== undefined) void persistNow();
 });
 $("#chat-input").addEventListener("keydown", (ev) => {
   if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing) {
@@ -1064,9 +1088,9 @@ $("#chat-input").addEventListener("keydown", (ev) => {
 });
 $("#chat-form").onsubmit = (ev) => {
   ev.preventDefault();
-  if (!active) return;
-  const e = studyRecord.encounters[active],
-    input = $<HTMLTextAreaElement>("#chat-input"),
+  const e = openEncounter();
+  if (!e) return;
+  const input = $<HTMLTextAreaElement>("#chat-input"),
     text = input.value;
   if (!text.trim() || e.tutorRequests?.some((j) => j.state === "pending")) {
     logEvent("terminal-message-blocked", {
@@ -1082,11 +1106,11 @@ $("#chat-form").onsubmit = (ev) => {
 
 // ---- Page lifecycle ---------------------------------------------------------
 
-window.addEventListener("blur", () => void persist());
+window.addEventListener("blur", () => void persistNow());
 // A closing tab gets a full save: its synchronous local copy lands even when
 // the IndexedDB write cannot finish before the page goes away.
 window.addEventListener("pagehide", () => {
-  void persist();
+  void persistNow();
   void lessons.flush();
 });
 window.addEventListener("online", () => {
@@ -1094,13 +1118,13 @@ window.addEventListener("online", () => {
 });
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") {
-    void persist();
+    void persistNow();
     void lessons.flush();
   }
 });
-/** The periodic repaint: status lines, the skill map and the open question. */
 /** The relay's mode at the last repaint: work waits for it to come back. */
 let repaintedMode = status().mode;
+/** The periodic repaint: status lines, the skill map and the open question. */
 function ui() {
   if (status().mode !== repaintedMode) {
     repaintedMode = status().mode;
@@ -1117,10 +1141,9 @@ function ui() {
   renderTerminal();
   lessonSurface.render();
   lessonSurface.renderGapList();
-  lessonSurface.renderOffers(
-    active ? studyRecord.encounters[active] : undefined,
-  );
+  lessonSurface.renderOffers(openEncounter());
 }
+let lastUI = 0;
 function tick(time: number) {
   if (time - lastUI > 200) {
     lastUI = time;

@@ -71,6 +71,8 @@ test("a failed full-record import reports a clear unsaved warning", async ({
   await expect(page.locator("#import-status")).toContainText(
     "Import opened in this tab but could not be saved",
   );
+  // Cleared, so choosing the same file again once storage works imports it.
+  await expect(page.locator("#import")).toHaveValue("");
   expect(
     await page.evaluate(() => ({
       seq: (window as any).__studyApp.record.seq,
@@ -254,7 +256,7 @@ test("durable saves retain a large draft beyond localStorage capacity", async ({
     .getByRole("button", { name: "Save progress", exact: true })
     .click();
   await expect(page.locator("#menu-save-status")).toContainText(
-    "Run saved locally",
+    "Progress saved locally",
     { timeout: 15000 },
   );
   await page.reload();

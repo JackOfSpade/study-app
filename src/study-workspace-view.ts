@@ -1,4 +1,5 @@
-import type { StudyRecord, Roadmap } from "./model";
+import { setNodeText } from "./dom";
+import type { Encounter, StudyRecord, Roadmap } from "./model";
 import {
   workspaceAssessment,
   workspaceProgressHtml,
@@ -23,9 +24,6 @@ interface WorkspaceViewState {
 
 const topicKey = (node: HTMLElement) =>
   `${node.dataset.topicKey}/D${node.dataset.tier}`;
-const writeText = (node: Element | null, value: string) => {
-  if (node && node.textContent !== value) node.textContent = value;
-};
 
 /** Study-only presentation and disclosure state; learning mutations stay in the model. */
 export function createStudyWorkspaceView(
@@ -85,9 +83,12 @@ export function createStudyWorkspaceView(
     }
   }
 
-  function renderAssessments() {
+  /** The open topics' saved assessments; `open` is the unfinished question. */
+  function renderAssessments(
+    open = workspaceQuestion(readState().studyRecord),
+  ) {
     const { studyRecord } = readState();
-    const current = workspaceQuestion(studyRecord)?.problem?.contract;
+    const current = open?.problem?.contract;
     for (const node of topics) {
       const topicId = node.dataset.topicKey ?? "";
       const tier = Number(node.dataset.tier);
@@ -107,8 +108,10 @@ export function createStudyWorkspaceView(
         roadmap.sourceHash,
       );
       const date = record ? new Date(record.updatedAt).toLocaleString() : "";
-      const text = (selector: string, value: string) =>
-        writeText(panel.querySelector(selector), value);
+      const text = (selector: string, value: string) => {
+        const node = panel.querySelector(selector);
+        if (node) setNodeText(node, value);
+      };
       text(
         ".study-topic-assessment-meta",
         `Tier ${tier}${record && record.depth !== tier ? ` · Latest assessment after a Tier ${record.depth} question` : ""}${date ? ` · Updated ${date}` : ""}`,
@@ -185,8 +188,9 @@ export function createStudyWorkspaceView(
     const { studyRecord, starting, saving, saveError, terminalOpen } =
       readState();
     if (!studyRecord.studyWorkspace?.enabled) return;
-    const html = workspaceProgressHtml(studyRecord, roadmap);
-    const open = workspaceQuestion(studyRecord);
+    // One lookup per render: it scans every saved question.
+    const open: Encounter | undefined = workspaceQuestion(studyRecord);
+    const html = workspaceProgressHtml(studyRecord, roadmap, open);
     const needBaseline = !!open && baseline?.id !== open.id;
     // Take the baseline from the DOM before any rewrite, so it reflects the
     // state the learner saw when the question began.
@@ -216,7 +220,7 @@ export function createStudyWorkspaceView(
       writtenHtml = html;
       topics = [...progress.querySelectorAll<HTMLElement>(".study-map-topic")];
       if (topics.length) updateTabStop();
-      renderAssessments();
+      renderAssessments(open);
       for (const node of topics) {
         sizes.observe(node.querySelector("[data-study-topic-toggle]")!);
         if (topicKey(node) === focusedKey)
@@ -245,11 +249,11 @@ export function createStudyWorkspaceView(
           currentTopic.getBoundingClientRect().top -
           scroller.getBoundingClientRect().top -
           24;
-    } else renderAssessments();
+    } else renderAssessments(open);
     if (needBaseline && baseline?.id !== open.id)
       baseline = { id: open.id, snapshot: readMapSnapshot(progress) };
 
-    const current = workspaceQuestion(studyRecord);
+    const current = open;
     const assessment = workspaceAssessment(studyRecord);
     const selected = workspaceSelectedQuestion(studyRecord);
     if (
@@ -324,7 +328,7 @@ export function createStudyWorkspaceView(
       saving ||
       !!saveError ||
       (assessment !== undefined && assessment.status !== "applied");
-    writeText(
+    setNodeText(
       next,
       starting
         ? "Preparing question…"
@@ -338,7 +342,7 @@ export function createStudyWorkspaceView(
     saveRetry.hidden = !saveError;
     const received =
       workspaceSelectedQuestion(studyRecord)?.state === "consumed";
-    writeText(
+    setNodeText(
       saveStatus,
       saveError ||
         (saving

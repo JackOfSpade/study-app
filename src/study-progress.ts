@@ -25,7 +25,7 @@ interface StudyCheckpoint {
   sourceRefs: string;
 }
 
-/** Shared requirements for the compact progress summary and the detailed workspace map. */
+/** The depth and objectives a track requires at its current (or a given) tier. */
 function trackRequirements(
   r: Roadmap,
   s: StudyState,
@@ -40,22 +40,6 @@ function trackRequirements(
     (o) => effectiveTarget(o, studyFocus(s)) >= tier,
   );
   return { live, state, tier, objectives };
-}
-
-/** The progress summary needs counts, not a reconstruction of every facet and evidence row. */
-export function studyTrackSummary(r: Roadmap, s: StudyState, track: Track) {
-  const { live, state, tier, objectives } = trackRequirements(r, s, track);
-  return {
-    tier,
-    passed: objectives.filter(
-      (o) =>
-        (live
-          ? s.learner?.cells[o.id]?.states[tier - 1]
-          : o.cells[tier - 1]) === "P",
-    ).length,
-    total: objectives.length,
-    queue: state?.queue ?? s.queues[track],
-  };
 }
 
 /** Current-tier requirements only; practice observes imported credit, never adds it. */

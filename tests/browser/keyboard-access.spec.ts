@@ -120,3 +120,14 @@ test("menu submenus return home before Esc closes the menu", async ({
   await page.keyboard.press("Escape");
   await expect(page.locator("#menu")).toBeHidden();
 });
+
+test("Esc closes the bug report without opening the menu", async ({ page }) => {
+  await mockClaudeStudy(page);
+  await page.goto("/");
+  await page.waitForFunction(() => !!(window as any).__studyApp?.record);
+  await page.locator("[data-bug-report]").click();
+  await expect(page.locator("#bug-report")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#bug-report")).toBeHidden();
+  await expect(page.locator("#menu")).toBeHidden();
+});

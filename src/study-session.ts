@@ -107,10 +107,11 @@ export function installStudySession(host: StudySessionHost) {
       renderWorkspace();
     }
     await host.persist();
-    if (generation !== saveGeneration || host.studyRecord() !== savedRecord)
-      return;
+    // The newest save clears the indicator even when an import replaced the
+    // record meanwhile; nothing else would.
+    if (generation !== saveGeneration) return;
     saving = false;
-    if (savedRecord.studyWorkspace?.enabled) renderWorkspace();
+    if (host.studyRecord().studyWorkspace?.enabled) renderWorkspace();
   }
 
   /** A question's preparation moved on: show it and keep it. */

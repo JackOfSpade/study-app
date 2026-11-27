@@ -199,27 +199,3 @@ test("terminal observations never silently withdraw previously verified credit",
   assert.equal(result.gaps.length, 1);
   assert.equal(studyTrackProgress(r, s, "PE").passed, 5);
 });
-
-test("compact progress summaries match the detailed map across profiles, depths and evidence", async () => {
-  const { studyTrackSummary } = await import("../src/study-progress");
-  for (const profile of ["live", "development"] as const) {
-    const s = initialStudy(r, profile);
-    for (const focus of ["full", "career"] as const) {
-      // Use the default career profile or explicitly select the full curriculum.
-      if (focus === "full") activateCareerFocus(r, s, "full");
-      else activateCareerFocus(r, s);
-      for (const track of ["PY", "PE"] as const) {
-        for (const tier of [1, 2, 3, 4]) {
-          s.learner!.tracks[track].tier = tier;
-          const detail = studyTrackProgress(r, s, track);
-          assert.deepEqual(studyTrackSummary(r, s, track), {
-            tier: detail.tier,
-            passed: detail.passed,
-            total: detail.total,
-            queue: detail.queue,
-          });
-        }
-      }
-    }
-  }
-});

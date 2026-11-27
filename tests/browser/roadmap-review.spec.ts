@@ -113,7 +113,7 @@ test("Claude CLI roadmap review survives reload with exact files and provider, t
       .click();
     // The click resolves before the async save; reloading earlier loses it.
     await expect(page.locator("#menu-save-status")).toContainText(
-      "Run saved locally",
+      "Progress saved locally",
     );
     await page.reload();
     await openAgentMenu(page);
