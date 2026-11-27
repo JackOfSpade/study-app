@@ -49,7 +49,10 @@ export const LESSON_FORMAT = [
   `Every string is plain text: no control characters other than newline and tab, no bidirectional override characters, no HTML. An optional block that breaks a rule is dropped from the lesson; a prose block or a core field that breaks one makes the whole lesson unusable. The whole lesson is at most ${LESSON_LIMITS.bytes} bytes of JSON and a section holds at most ${LESSON_LIMITS.blocksPerSection} blocks.`,
 ].join("\n");
 
-const ID = /^[a-z][a-z0-9-]{0,31}$/;
+/** The pattern of every section, node and option id. No g or y flag, so
+ * `test` is stateless. */
+export const LESSON_ID = /^[a-z][a-z0-9-]{0,31}$/;
+const ID = LESSON_ID;
 const TOPLEVEL = ["v", "title", "summary", "minutes", "sections"];
 const FORBIDDEN = [
   "knowledge",

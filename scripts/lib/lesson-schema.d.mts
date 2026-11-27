@@ -115,6 +115,8 @@ export const LESSON_LIMITS: {
   edges: number;
   chatText: number;
 };
+/** The pattern of every section, node and option id. */
+export const LESSON_ID: RegExp;
 export const LESSON_BLOCK_KINDS: readonly LessonBlock["kind"][];
 /** The schema as the model is told it. */
 export const LESSON_FORMAT: string;

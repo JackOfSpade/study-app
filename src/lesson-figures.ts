@@ -4,9 +4,7 @@
  * model wrote leaves here as `text` on a node, never as an attribute; every
  * attribute value is a class name, a number or an id built from indices.
  */
-import type { LessonBlock } from "./lesson-types";
-
-type Of<K extends LessonBlock["kind"]> = Extract<LessonBlock, { kind: K }>;
+import type { BlockOf } from "./lesson-types";
 
 /**
  * One element the DOM layer will create. `text` becomes textContent, `html` is
@@ -62,14 +60,14 @@ const num = (value: number) =>
   String(Math.round((Number.isFinite(value) ? value : 0) * 100) / 100);
 
 /** The lines of a piece of code; one trailing newline adds no empty line. */
-export function splitCodeLines(code: string): string[] {
+function splitCodeLines(code: string): string[] {
   const lines = code.replace(/\r\n?/g, "\n").split("\n");
   if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
   return lines;
 }
 
 /** One span.lesson-line per line, each with its own line-number span. */
-export function codeLineNodes(
+function codeLineNodes(
   code: string,
   highlight: readonly number[] = [],
   current?: number,
@@ -187,7 +185,7 @@ const TONE_WORD: Record<Tone, string> = {
   bad: "marked as a problem",
 };
 
-export interface DiagramBox {
+interface DiagramBox {
   /** Position in the block's node list. */
   index: number;
   id: string;
@@ -200,7 +198,7 @@ export interface DiagramBox {
   h: number;
 }
 
-export interface DiagramEdge {
+interface DiagramEdge {
   from: string;
   to: string;
   x1: number;
@@ -244,7 +242,7 @@ function exitPoint(
 /** Puts every node in its grid cell and joins the nodes with arrows. The grid
  * is trimmed to the columns and rows in use. Edges to missing nodes and edges
  * from a node to itself are left out. */
-export function layoutDiagram(block: Of<"diagram">): DiagramLayout {
+export function layoutDiagram(block: BlockOf<"diagram">): DiagramLayout {
   const placed = block.nodes.map((node, index) => ({
     node,
     index,
@@ -319,7 +317,7 @@ export function layoutDiagram(block: Of<"diagram">): DiagramLayout {
 }
 
 /** The picture itself: one svg, drawn only from app-computed numbers. */
-export function diagramSvg(block: Of<"diagram">, uid: string): LessonNode {
+export function diagramSvg(block: BlockOf<"diagram">, uid: string): LessonNode {
   const layout = layoutDiagram(block);
   const titleId = `${uid}-title`;
   const markerId = `${uid}-arrow`;
@@ -450,19 +448,32 @@ export function diagramSvg(block: Of<"diagram">, uid: string): LessonNode {
   );
 }
 
-/** The same diagram as lists, for anyone who cannot use the picture. */
-export function diagramTextVersion(block: Of<"diagram">): LessonNode {
-  const labels = new Map<string, string>();
+/** The same diagram as lists, for anyone who cannot use the picture. Two boxes
+ * with the same label are told apart by a number: "DB (1)", "DB (2)". */
+export function diagramTextVersion(block: BlockOf<"diagram">): LessonNode {
+  const total = new Map<string, number>();
   for (const node of block.nodes)
-    if (!labels.has(node.id)) labels.set(node.id, node.label);
-  const boxes = block.nodes.map((node) => {
+    total.set(node.label, (total.get(node.label) ?? 0) + 1);
+  const seen = new Map<string, number>();
+  const names = block.nodes.map((node) => {
+    if (total.get(node.label) === 1) return node.label;
+    const k = (seen.get(node.label) ?? 0) + 1;
+    seen.set(node.label, k);
+    return `${node.label} (${k})`;
+  });
+  const labels = new Map<string, string>();
+  block.nodes.forEach((node, i) => {
+    if (!labels.has(node.id)) labels.set(node.id, names[i]);
+  });
+  const boxes = block.nodes.map((node, i) => {
     const word = TONE_WORD[toneOf(node.tone)];
-    return n("li", {}, { text: word ? `${node.label} (${word})` : node.label });
+    return n("li", {}, { text: word ? `${names[i]} (${word})` : names[i] });
   });
   const arrows = block.edges.flatMap((edge) => {
     const from = labels.get(edge.from);
     const to = labels.get(edge.to);
-    if (from === undefined || to === undefined || from === to) return [];
+    if (from === undefined || to === undefined || edge.from === edge.to)
+      return [];
     return [
       n(
         "li",
@@ -496,7 +507,7 @@ export function diagramTextVersion(block: Of<"diagram">): LessonNode {
 // Step-through figures
 // ---------------------------------------------------------------------------
 
-export interface PreparedFrame {
+interface PreparedFrame {
   caption: string;
   /** 1-based line of the code, when it is in range. */
   line?: number;
@@ -518,7 +529,7 @@ export interface PreparedSteps {
 
 /** Every frame's data, cleaned and ready before the figure is shown, so
  * stepping only has to copy it onto existing nodes. */
-export function prepareSteps(block: Of<"steps">): PreparedSteps {
+export function prepareSteps(block: BlockOf<"steps">): PreparedSteps {
   const codeLines = block.code ? splitCodeLines(block.code).length : 0;
   const frames = block.frames.map((frame): PreparedFrame => {
     const cells = frame.cells ?? [];
@@ -578,10 +589,10 @@ const button = (
  * `{ section, block }` as numbers: they are the only way the figure is found
  * again. Returns undefined when the block has no frames. */
 export function stepsFigure(
-  block: Of<"steps">,
+  block: BlockOf<"steps">,
   where: { section: number; block: number },
   uid: string,
-): { node: LessonNode; steps: PreparedSteps } | undefined {
+): LessonNode | undefined {
   const steps = prepareSteps(block);
   const first = steps.frames[0];
   if (!first) return undefined;
@@ -693,19 +704,16 @@ export function stepsFigure(
     n("div", { class: "lesson-figure-body" }, { children: kids }),
   ];
   if (block.caption) figureKids.push(n("figcaption", {}, rich(block.caption)));
-  return {
-    steps,
-    node: n(
-      "figure",
-      {
-        class: "lesson-figure lesson-steps",
-        role: "group",
-        tabindex: "0",
-        "aria-labelledby": labelId,
-        "data-section": String(where.section),
-        "data-block": String(where.block),
-      },
-      { children: figureKids },
-    ),
-  };
+  return n(
+    "figure",
+    {
+      class: "lesson-figure lesson-steps",
+      role: "group",
+      tabindex: "0",
+      "aria-labelledby": labelId,
+      "data-section": String(where.section),
+      "data-block": String(where.block),
+    },
+    { children: figureKids },
+  );
 }

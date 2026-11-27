@@ -5,8 +5,9 @@
  *
  * Which lesson is open lives in memory only. The lesson body is mounted once
  * per lesson (`mountLesson` draws it from data) and never rebuilt by a repaint;
- * everything else here, the status lines, the footer buttons and the chat,
- * is rewritten only when its content changed. Nothing here touches the
+ * the status lines and the footer buttons are rewritten only when their
+ * content changed, and the chat draws each message once and adds to itself.
+ * Nothing here touches the
  * learner's saved record: reading a lesson, answering its checks and chatting
  * record nothing about knowing, so "Test me on this" only hands the gap to the
  * host.
@@ -17,7 +18,8 @@ import { escapeHtml as escape } from "./html";
 import { encounterGaps, type KnowledgeGapRecord } from "./knowledge-probe";
 import { lessonGap, lessonOffer, openLessonGaps, type Lessons } from "./lesson";
 import { mountLesson, type MountedLesson } from "./lesson-render";
-import type { LessonDoc } from "./lesson-types";
+import type { LessonDoc, LessonMessage } from "./lesson-types";
+import { markdownToHtml } from "./markdown";
 import type { Encounter, Roadmap, StudyRecord } from "./model";
 import { messageBubble } from "./terminal-panels";
 
@@ -160,10 +162,15 @@ export function createLessonSurface(host: LessonSurfaceHost) {
     host.log("lesson-closed", { gap });
     // The list is drawn again first so its button for this gap exists.
     renderGapList();
+    // The opener is gone when its list was redrawn (its label follows the
+    // lesson): then this gap's button that can be seen, wherever it is. The
+    // map's list comes first in the page but is often folded away.
     const button = () =>
-      document.querySelector<HTMLElement>(
-        `[data-lesson-gap="${CSS.escape(gap)}"]`,
-      );
+      [
+        ...document.querySelectorAll<HTMLElement>(
+          `[data-lesson-gap="${CSS.escape(gap)}"]`,
+        ),
+      ].find((el) => visible(el));
     const back = openerGap
       ? (visible(
           gapList.querySelector<HTMLElement>(
@@ -318,37 +325,142 @@ export function createLessonSurface(host: LessonSurfaceHost) {
 
   // ---- The tutor chat ----------------------------------------------------------
 
+  /** The chat's nodes, drawn once per message and kept: a streamed reply only
+   * rewrites its own bubble, so focus, selection and the scroll position
+   * elsewhere in the chat survive, and markdown runs once per message. */
+  const chat = {
+    /** The gap whose chat is drawn; another one starts from empty. */
+    gap: undefined as string | undefined,
+    messages: new Map<
+      string,
+      Pick<LessonMessage, "role" | "text" | "section"> & {
+        title?: string;
+        nodes: ChildNode[];
+      }
+    >(),
+    /** The newest message drawn, to see when the learner just sent one. */
+    last: undefined as string | undefined,
+    typing: undefined as { text: string; node: HTMLElement } | undefined,
+    suggestions: undefined as ChildNode | undefined,
+  };
+
+  const parse = (html: string) => {
+    const template = document.createElement("template");
+    template.innerHTML = html;
+    return [...template.content.childNodes];
+  };
+
+  /** A message's bubble and, under a tutor reply that points at a section,
+   * the button that shows it. `title` is that section's title. */
+  function messageMarkup(m: LessonMessage, title: string | undefined) {
+    if (m.role === "learner") return messageBubble("human", "You", m.text);
+    return (
+      messageBubble("tutor", "Tutor", m.text) +
+      (m.section && title !== undefined
+        ? `<button type="button" class="quiet lesson-show" data-lesson-show="${escape(m.section)}">Show: ${escape(title)}</button>`
+        : "")
+    );
+  }
+
+  /** The reply being streamed: one bubble whose body alone is rewritten. */
+  function typingNode(text: string) {
+    if (!chat.typing) {
+      const [node] = parse(messageBubble("tutor", "Tutor", ""));
+      chat.typing = { text: "", node: node as HTMLElement };
+    }
+    if (chat.typing.text !== text) {
+      chat.typing.text = text;
+      chat.typing.node.querySelector(".message-body")!.innerHTML =
+        markdownToHtml(text);
+    }
+    return chat.typing.node;
+  }
+
+  function suggestionsNode() {
+    chat.suggestions ??= parse(
+      `<div class="lesson-suggestions">${SUGGESTIONS.map(
+        (text, i) =>
+          `<button type="button" class="quiet" data-lesson-suggest="${i}">${escape(text)}</button>`,
+      ).join("")}</div>`,
+    )[0];
+    return chat.suggestions;
+  }
+
+  /** Puts exactly `wanted` in the chat, in order, moving no node that is
+   * already in place. Says whether anything changed. */
+  function placeChat(wanted: ChildNode[]) {
+    const keep = new Set(wanted);
+    let changed = false;
+    for (const node of [...messages.childNodes])
+      if (!keep.has(node)) {
+        node.remove();
+        changed = true;
+      }
+    wanted.forEach((node, i) => {
+      const at = messages.childNodes[i] ?? null;
+      if (at === node) return;
+      messages.insertBefore(node, at);
+      changed = true;
+    });
+    return changed;
+  }
+
   function renderChat(gap: KnowledgeGapRecord, lesson: LessonDoc | undefined) {
     const rec = lessons.record(gap.id);
     if (!rec || !lesson) return;
+    const fresh = chat.gap !== gap.id;
+    if (fresh) {
+      chat.gap = gap.id;
+      chat.messages.clear();
+      chat.last = undefined;
+    }
     const titles = new Map(lesson.sections.map((s) => [s.id, s.title]));
     const typing = lessons.streaming(gap.id);
     const busy = rec.chat.some((m) => m.state === "pending");
-    const html =
-      rec.chat
-        .map((m) =>
-          m.role === "learner"
-            ? messageBubble("human", "You", m.text)
-            : messageBubble("tutor", "Tutor", m.text) +
-              (m.section && titles.has(m.section)
-                ? `<button type="button" class="quiet lesson-show" data-lesson-show="${escape(m.section)}">Show: ${escape(titles.get(m.section)!)}</button>`
-                : ""),
-        )
-        .join("") +
-      (busy && typing ? messageBubble("tutor", "Tutor", typing) : "") +
-      (!rec.chat.length && rec.state === "ready"
-        ? `<div class="lesson-suggestions">${SUGGESTIONS.map(
-            (text, i) =>
-              `<button type="button" class="quiet" data-lesson-suggest="${i}">${escape(text)}</button>`,
-          ).join("")}</div>`
-        : "");
-    if (setHtml(messages, html)) messages.scrollTop = messages.scrollHeight;
-    const last = rec.chat[rec.chat.length - 1];
-    const failed = last?.role === "learner" && last.state === "failed";
+    const wanted: ChildNode[] = [];
+    const ids = new Set<string>();
+    for (const m of rec.chat) {
+      ids.add(m.id);
+      // Drawn again only when something its markup shows has changed.
+      const title = m.section ? titles.get(m.section) : undefined;
+      let drawn = chat.messages.get(m.id);
+      if (
+        !drawn ||
+        drawn.role !== m.role ||
+        drawn.text !== m.text ||
+        drawn.section !== m.section ||
+        drawn.title !== title
+      ) {
+        drawn = {
+          role: m.role,
+          text: m.text,
+          section: m.section,
+          title,
+          nodes: parse(messageMarkup(m, title)),
+        };
+        chat.messages.set(m.id, drawn);
+      }
+      wanted.push(...drawn.nodes);
+    }
+    // Messages trimmed away or cleared by a new lesson are let go.
+    for (const id of chat.messages.keys())
+      if (!ids.has(id)) chat.messages.delete(id);
+    if (busy && typing) wanted.push(typingNode(typing));
+    if (!rec.chat.length && rec.state === "ready")
+      wanted.push(suggestionsNode());
+    const atBottom =
+      messages.scrollHeight - messages.scrollTop - messages.clientHeight < 8;
+    const newest = rec.chat[rec.chat.length - 1];
+    const justSent = newest?.role === "learner" && newest.id !== chat.last;
+    chat.last = newest?.id;
+    // Follow the conversation unless the learner has scrolled up to reread.
+    if (placeChat(wanted) && (fresh || atBottom || justSent))
+      messages.scrollTop = messages.scrollHeight;
+    const failed = newest?.role === "learner" && newest.state === "failed";
     setHtml(
       chatStatus,
       failed
-        ? `<p>${escape(last.error ?? "The reply did not arrive.")}</p><button type="button" class="quiet" data-lesson-action="chat-retry">Try again</button>`
+        ? `<p>${escape(newest.error ?? "The reply did not arrive.")}</p><button type="button" class="quiet" data-lesson-action="chat-retry">Try again</button>`
         : busy && !typing
           ? "<p>Waiting for a reply.</p>"
           : rec.state !== "ready"
@@ -360,7 +472,7 @@ export function createLessonSurface(host: LessonSurfaceHost) {
   }
 
   /** Sends a chat message. Says at once whether it was started; `rejected` is
-   * called if the lesson later refuses it (an explicit false). */
+   * called if the lesson then refuses it. */
   function send(text: string, rejected?: () => void) {
     const gap = openGap;
     if (!gap) return false;
@@ -368,9 +480,8 @@ export function createLessonSurface(host: LessonSurfaceHost) {
     if (!text.trim() || rec?.state !== "ready") return false;
     if (rec.chat.some((m) => m.state === "pending")) return false;
     host.log("lesson-message", { gap, chars: text.length });
-    // Older lessons resolve to nothing; only an explicit false is a refusal.
-    void Promise.resolve(lessons.send(gap, text)).then((accepted) => {
-      if ((accepted as unknown) === false) rejected?.();
+    void lessons.send(gap, text).then((accepted) => {
+      if (!accepted) rejected?.();
     });
     return true;
   }
@@ -500,7 +611,6 @@ export function createLessonSurface(host: LessonSurfaceHost) {
   offers.addEventListener("click", (event) => onEntry(event, false));
   gapList.addEventListener("click", (event) => onEntry(event, true));
 
-  /** Under a finished question: its recorded gaps that are still open. */
   /** Writes a list of lesson buttons. A button's label changes as its lesson
    * is written, and the rewrite replaces the node: keep focus on that gap. */
   function writeButtons(box: HTMLElement, html: string) {
@@ -515,6 +625,7 @@ export function createLessonSurface(host: LessonSurfaceHost) {
       ?.focus({ preventScroll: true });
   }
 
+  /** Under a finished question: its recorded gaps that are still open. */
   function renderOffers(e: Encounter | undefined) {
     const gaps =
       e && e.state === "consumed"

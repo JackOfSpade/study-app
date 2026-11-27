@@ -123,6 +123,10 @@ test("the step-through figure advances with its buttons and with the arrow keys"
   await expect(count).toHaveText("Step 3 of 3");
   await page.keyboard.press("ArrowLeft");
   await expect(count).toHaveText("Step 2 of 3");
+  // Inside the code panel the arrow keys scroll the code, not the steps.
+  await figure.locator(".lesson-pre").focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(count).toHaveText("Step 2 of 3");
   await figure.getByRole("button", { name: "Restart" }).click();
   await expect(count).toHaveText("Step 1 of 3");
 });
@@ -219,6 +223,8 @@ test("the tutor chat answers, points at a section, and a failed reply retries", 
   await expect(input).toHaveValue("first\nsecond");
   expect(study.chatCalls()).toHaveLength(1);
   await input.fill("");
+  // Messages already drawn are kept as they are while the chat grows.
+  await human.first().evaluate((el) => ((el as any).__kept = true));
   // A reply that fails shows its reason and a retry.
   study.fail("lesson-chat", "Synthetic reply failure");
   study.replyChat(() => ({ text: "Second try worked." }));
@@ -229,6 +235,7 @@ test("the tutor chat answers, points at a section, and a failed reply retries", 
   await status.getByRole("button", { name: "Try again" }).click();
   await expect(tutor.last()).toContainText("Second try worked.");
   await expect(status).toBeHidden();
+  expect(await human.first().evaluate((el) => (el as any).__kept)).toBe(true);
   expect(study.chatCalls()).toHaveLength(3);
   expect(study.chatCalls()[2].payload.requestId).not.toBe(
     study.chatCalls()[1].payload.requestId,

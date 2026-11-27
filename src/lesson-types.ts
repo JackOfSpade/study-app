@@ -4,13 +4,15 @@
  * checks or its chat is evidence of mastery: a gap closes only when a question
  * shows the learner has it.
  */
-import type { LessonDoc } from "../scripts/lib/lesson-schema.mjs";
+import type { LessonBlock, LessonDoc } from "../scripts/lib/lesson-schema.mjs";
 
-export type {
+export type { LessonBlock, LessonDoc } from "../scripts/lib/lesson-schema.mjs";
+
+/** The block of one kind. */
+export type BlockOf<K extends LessonBlock["kind"]> = Extract<
   LessonBlock,
-  LessonDoc,
-  LessonSection,
-} from "../scripts/lib/lesson-schema.mjs";
+  { kind: K }
+>;
 
 /** One message in the chat beside a lesson. */
 export interface LessonMessage {
