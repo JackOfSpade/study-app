@@ -325,6 +325,38 @@ test("a question has no total time limit, but each part does", () => {
     instructions,
     /answer each part yourself, as the learner would, from prompt and that part alone, and make sure its words ask for the answer the rubric expects/,
   );
+  // The 2026-11-28 generate quality loop (round 1, 2 of 12 passed): rubric
+  // lines required a remedy, a rejected alternative or a rebuttal the ask never
+  // named, and prompts or asks gave the tested insight away.
+  assert.match(
+    instructions,
+    /Check each line against the shortest complete correct answer to its ask as worded, which must satisfy it: a line for a diagnosis never also requires the remedy/,
+  );
+  assert.match(
+    instructions,
+    /a distractor is a claim that must not appear, never a statement the answer must make/,
+  );
+  assert.match(
+    instructions,
+    /A verdict and its reason are one judgement; a remedy, a comparison or a further consequence is another/,
+  );
+  assert.match(
+    instructions,
+    /A value a line requires follows from the stated facts, or the ask names it as the learner's choice to justify/,
+  );
+  assert.match(
+    instructions,
+    /the prompt states facts, never the definition, rule or insight a rubric line checks/,
+  );
+  assert.match(
+    instructions,
+    /a later part never presumes an earlier part's verdict \('the same kind of problem'\)/,
+  );
+  assert.match(
+    instructions,
+    /Ask for a superlative \('worst', 'most important'\) only when the rubric checks one defensible answer/,
+  );
+  assert.match(instructions, /material no part asks about is never kept/);
   assert.match(
     taskInstructions("assess", { contract }) as string,
     /a result that a later part states is never help for an answer given in an earlier part/,

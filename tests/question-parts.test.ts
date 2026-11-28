@@ -343,6 +343,9 @@ test("a part that asks for more than one thing is sent back, a single ask is not
     "Which approach would you use, and why? Give its total time cost.",
     "For A, give the cost of one `schedule`. Do the same for B.",
     "Propose one guardrail metric. Say what harm it would catch.",
+    // From the 2026-11-28 generate quality loop: one request over a list.
+    "Give the full `FormState` after each of events 1-5, and why.",
+    "Classify these three values. For each, say who owns it, and why.",
   ];
   for (const part of compound)
     assert.match(
@@ -350,6 +353,18 @@ test("a part that asks for more than one thing is sent back, a single ask is not
       /^parts\[1\] asks for more than one thing/,
       part,
     );
+  // A loop in a specification, or in code, is not a request per item.
+  assert.equal(
+    compoundPartProblem([
+      "Implement `totals(orders)` returning, for each user, their total.",
+      "What does `for each, x` print?",
+    ]),
+    undefined,
+  );
+  assert.match(
+    compoundPartProblem(["Label each line as safe or unsafe."]) ?? "",
+    /'Label each' asks for one answer per item/,
+  );
   // Code is material, never a request.
   assert.equal(
     partRequests("```py\n# Give x? List y.\n```\nWhat does it print?").length,
