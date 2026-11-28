@@ -385,6 +385,34 @@ test("a question has no total time limit, but each part does", () => {
     instructions,
     /Never ask for a count of items of one kind \('name two assumptions', 'give three risks'\) when one shows the same skill/,
   );
+  // Round 3 (6 of 12 passed): a 'such as' example that only half fixed the
+  // problem, two alternative findings joined by 'and', one required reason when
+  // others were correct, a required step of a kind the ask never named, and
+  // give-aways through a team guideline, a premise or category vocabulary.
+  assert.match(
+    instructions,
+    /each 'such as' example is itself a complete correct answer to the ask, never a partial fix/,
+  );
+  assert.match(
+    instructions,
+    /a line never joins with 'and' two findings either of which answers the ask; and a reason the line requires is any reason the facts support unless the ask names one/,
+  );
+  assert.match(
+    instructions,
+    /a line for an ask that names one kind of item \('the files and functions it passes through'\) never requires an item of another kind/,
+  );
+  assert.match(
+    instructions,
+    /a team guideline, a requirement or a part's premise that states the rule or the reason being tested/,
+  );
+  assert.match(
+    instructions,
+    /an item described in the words of the category or answer it is to be matched to: describe items by behaviour/,
+  );
+  assert.match(
+    instructions,
+    /a premise a part adds keeps in play what the part tests/,
+  );
   assert.match(
     taskInstructions("assess", { contract }) as string,
     /a result that a later part states is never help for an answer given in an earlier part/,
