@@ -533,6 +533,14 @@ test("tutor instructions use focused questioning without breadth inflation", () 
   const assess = taskInstructions("assess", {}) as string;
   assert.ok(assess.includes(ASSESSMENT_HELP_GUIDANCE));
   assert.match(
+    assess,
+    /Judge each facet against what the question and the part it was asked in requested/,
+  );
+  assert.match(
+    assess,
+    /an element a rubric line requires that the ask did not name .* is not required, and its absence never makes a facet unknown or assisted; a false or unsupported claim still counts/,
+  );
+  assert.match(
     ASSESSMENT_HELP_GUIDANCE,
     /only repeats or rewords a part of the issued question/,
   );

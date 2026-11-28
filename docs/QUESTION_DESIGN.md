@@ -43,7 +43,7 @@ The learner cannot see the rubric, so it is not the pass bar. The tutor's copy o
 
 `TERMINAL_DIALOGUE_INSTRUCTION` states the test once more at the point of decision: keep the question open only for something false, unsupported or missing that can be named.
 
-This came from a real question on 2026-11-19 whose rubric line required both completion rates and both measurement windows while the ask requested neither: the tutor held a truthful rewrite open over "increased by 7%" (61% to 68%), gave two different reasons for it, and delivered a credit-costing hint the learner had not asked for. The assessment still reads the full rubric.
+This came from a real question on 2026-11-19 whose rubric line required both completion rates and both measurement windows while the ask requested neither: the tutor held a truthful rewrite open over "increased by 7%" (61% to 68%), gave two different reasons for it, and delivered a credit-costing hint the learner had not asked for. The assessment still reads the full rubric, but judges each facet against what the question and its part asked: an element a rubric line requires that the ask never named (a remedy for a diagnosis, a specific figure, period, caveat or quality) is not required, so its absence never makes a facet unknown or assisted, while a false or unsupported claim still counts (`taskInstructions("assess")` in `scripts/lib/ai-contracts.mjs`).
 
 `TUTOR_JUDGEMENT_GUIDANCE` (in `scripts/lib/study-question-policy.mjs`), sent with both the open-question and the after-completion instruction, carries the same idea into the argument that follows:
 
