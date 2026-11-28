@@ -4,6 +4,7 @@ import {
   mockClaudeStudy,
   openStudyQuestion,
   studyState,
+  waitForStudyApp,
 } from "./study-harness";
 
 const help = { nudges: [], hints: [], gives: [], offers: [] };
@@ -111,6 +112,7 @@ test("a question with several asks is shown and answered one part at a time", as
   // The open part and the conversation survive a reload.
   await flushStudySave(page);
   await page.reload();
+  await waitForStudyApp(page);
   await expect(open).toContainText("Part 2 of 2");
   await expect(page.locator("#messages")).toContainText("A first attempt");
 

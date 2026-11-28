@@ -5,7 +5,7 @@ import type { Server } from "node:http";
 import { createStudyBridgeServer } from "../../scripts/study-bridge-server.mjs";
 import { openApp } from "./helpers/agent-menu";
 import { isolateRunnerBridge } from "./helpers/runner-bridge";
-import { flushStudySave } from "./study-harness";
+import { flushStudySave, waitForStudyApp } from "./study-harness";
 
 test("container workspace React API: immutable checks and preview survive later edits and reload without academic credit", async ({
   page,
@@ -166,7 +166,7 @@ test("container workspace React API: immutable checks and preview survive later 
     });
     await flushStudySave(page);
     await page.reload();
-    await page.waitForFunction(() => !!(window as any).__studyApp);
+    await waitForStudyApp(page);
     const saved = await page.evaluate(() => {
       const e = (window as any).__studyApp.record.encounters["question-0"];
       return { job: e.executions[0], draft: e.workspace };

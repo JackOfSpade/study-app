@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { mockClaudeStudy } from "./study-harness";
+import { mockClaudeStudy, waitForStudyApp } from "./study-harness";
 
 test("tier skill map shows connected topic nodes vertically and marks the current topic in a split pane", async ({
   page,
@@ -7,6 +7,7 @@ test("tier skill map shows connected topic nodes vertically and marks the curren
   await mockClaudeStudy(page);
   await page.setViewportSize({ width: 700, height: 900 });
   await page.goto("/");
+  await waitForStudyApp(page);
   const map = page.locator(".study-skill-map");
   const root = map.locator(".study-map-root");
   const columns = map.locator(".study-map-columns");
@@ -198,6 +199,7 @@ test("the study terminal takes the wide workspace while the map keeps its readin
 }) => {
   await mockClaudeStudy(page);
   await page.goto("/");
+  await waitForStudyApp(page);
   await page.setViewportSize({ width: 2000, height: 1100 });
   await page.evaluate(() => {
     (window as any).__studyApp.record.study.profile = "live";

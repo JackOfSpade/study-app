@@ -1,5 +1,6 @@
 import { openAgentMenu, openApp } from "./helpers/agent-menu";
 import { expect, test } from "@playwright/test";
+import { waitForStudyApp } from "./study-harness";
 
 test("retrying an assessment durably captures its pending request before a reply arrives", async ({
   page,
@@ -76,7 +77,7 @@ test("retrying an assessment durably captures its pending request before a reply
     // the relay is reachable, so the app sends that same request again by itself.
     const before = bridgeCalls;
     await page.reload();
-    await page.waitForFunction(() => !!(window as any).__studyApp);
+    await waitForStudyApp(page);
     await expect.poll(() => bridgeCalls).toBe(before + 1);
     const recovered = await page.evaluate(
       () => (window as any).__studyApp.record.study.assessments[0],

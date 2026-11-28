@@ -7,6 +7,7 @@ import {
   projectIdentifierCounters,
   readIdentifierCounters,
 } from "../../src/roadmap-identifiers";
+import { waitForStudyApp } from "./study-harness";
 
 for (const scenario of [
   "saved",
@@ -206,7 +207,7 @@ for (const scenario of [
       ).toBeVisible();
       expect(calls).toBe(1);
       await page.reload();
-      await page.waitForFunction(() => !!(window as any).__studyApp);
+      await waitForStudyApp(page);
       await openAgentMenu(page);
       await page.locator("#curriculum-button").click();
       await page
@@ -217,7 +218,7 @@ for (const scenario of [
     if (scenario === "interrupted") {
       const interruptedRelease = release;
       await page.reload();
-      await page.waitForFunction(() => !!(window as any).__studyApp);
+      await waitForStudyApp(page);
       interruptedRelease();
       await openAgentMenu(page);
       await page.locator("#curriculum-button").click();
@@ -387,7 +388,7 @@ for (const scenario of [
       });
     }
     await page.reload();
-    await page.waitForFunction(() => !!(window as any).__studyApp);
+    await waitForStudyApp(page);
     expect(
       await page.evaluate(
         () => (window as any).__studyApp.record.study.roadmapExport.content,

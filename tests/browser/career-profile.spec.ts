@@ -4,6 +4,7 @@ import {
   mockClaudeStudy,
   openStudyQuestion,
   studyState,
+  waitForStudyApp,
 } from "./study-harness";
 
 async function inspect(page: Page) {
@@ -61,7 +62,7 @@ test("the role profile is explicit, reversible and persists without replacing is
   expect(await sourceEvidence(page)).toBe(before);
   await flushStudySave(page);
   await page.reload();
-  await page.waitForFunction(() => !!(window as any).__studyApp);
+  await waitForStudyApp(page);
   await inspect(page);
   await expect(page.locator("#career-focus")).toHaveValue("full");
   expect(await sourceEvidence(page)).toBe(before);
@@ -73,7 +74,7 @@ test("the role profile is explicit, reversible and persists without replacing is
   expect(await sourceEvidence(page)).toBe(before);
   await flushStudySave(page);
   await page.reload();
-  await page.waitForFunction(() => !!(window as any).__studyApp);
+  await waitForStudyApp(page);
   await inspect(page);
   await expect(page.locator("#career-focus")).toHaveValue(
     "product-feature-owner",

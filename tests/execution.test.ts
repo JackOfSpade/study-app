@@ -46,7 +46,7 @@ test("runtime scope cannot raise the academic tier or make D1 implementation com
   assert.equal(e.executions, undefined);
   assert.equal(g.study.learner!.evidence.length, 0);
 });
-test("mock transport: a running code snapshot stays exact while edits, survival and backups continue", async () => {
+test("mock transport: a running code snapshot stays exact while edits, saves and backups continue", async () => {
   const { g, e, l } = fixture(),
     originalFetch = globalThis.fetch;
   let reply!: (r: Response) => void;

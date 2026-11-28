@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { mockClaudeStudy } from "./study-harness";
+import { mockClaudeStudy, waitForStudyApp } from "./study-harness";
 
 test("the app opens straight into the learning workspace with its own menu and settings", async ({
   page,
@@ -114,6 +114,7 @@ test("an unreadable save shows the recovery card and a restored backup opens the
 }, testInfo) => {
   await mockClaudeStudy(first);
   await first.goto("/");
+  await waitForStudyApp(first);
   await expect(first.locator("#study-workspace")).toBeVisible();
   const backup = await first.evaluate(async () => {
     const root = "/src/";

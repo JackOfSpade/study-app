@@ -4,6 +4,7 @@ import { expect, test } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import { tier4RoadmapFixture } from "../fixtures/tier4-roadmap";
 import { openAgentMenu, openApp, seedQuestions } from "./helpers/agent-menu";
+import { waitForStudyApp } from "./study-harness";
 
 // No browser case may accidentally release real model/bridge work.
 test.beforeEach(async ({ page }) => {
@@ -298,7 +299,7 @@ for (const fixtureKind of ["checkpoint", "transfer", "historical"] as const) {
       "revision 10",
     );
     await page.reload();
-    await page.waitForFunction(() => !!(window as any).__studyApp);
+    await waitForStudyApp(page);
     await openAgentMenu(page);
     await page.getByRole("button", { name: "Inspect" }).click();
     const secondDownload = page.waitForEvent("download");

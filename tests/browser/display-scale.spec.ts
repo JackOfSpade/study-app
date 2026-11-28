@@ -3,11 +3,12 @@ import {
   mockClaudeStudy,
   openStudyQuestion,
   studyState,
+  waitForStudyApp,
 } from "./study-harness";
 
 async function openSettings(page: Page) {
   // Escape is handled only once the saved record has loaded.
-  await page.waitForFunction(() => !!(window as any).__studyApp);
+  await waitForStudyApp(page);
   await page.keyboard.press("Escape");
   await expect(page.locator("#menu")).toBeVisible();
   await page.locator("#settings-toggle").click();
@@ -71,7 +72,7 @@ test("a saved record without the size preference opens at 100 percent", async ({
   page,
 }) => {
   await page.goto("/");
-  await page.waitForFunction(() => !!(window as any).__studyApp);
+  await waitForStudyApp(page);
   await page.evaluate(async () => {
     const root = "/src/",
       { save, flushSaves } = await import(

@@ -4,6 +4,7 @@ import { expect, test } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import { createRecord } from "../helpers/record";
 import { baselineFixture, roadmap as r } from "../helpers/baseline-correction";
+import { waitForStudyApp } from "./study-harness";
 
 test("original checkpoint correction exposes complete historical review before adoption and survives reload", async ({
   page,
@@ -115,7 +116,7 @@ test("original checkpoint correction exposes complete historical review before a
     "adopted and saved",
   );
   await page.reload();
-  await page.waitForFunction(() => !!(window as any).__studyApp);
+  await waitForStudyApp(page);
   const result = await page.evaluate(() => {
     const g = (window as any).__studyApp.record,
       l = g.study.learner;

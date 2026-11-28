@@ -4,6 +4,7 @@ import {
   mockClaudeStudy,
   openStudyQuestion,
   studyState,
+  waitForStudyApp,
 } from "./study-harness";
 
 test("curriculum dropdown owns its keys while it has focus", async ({
@@ -11,7 +12,7 @@ test("curriculum dropdown owns its keys while it has focus", async ({
 }) => {
   await mockClaudeStudy(page);
   await page.goto("/");
-  await page.waitForFunction(() => !!(window as any).__studyApp?.record);
+  await waitForStudyApp(page);
   await openAgentMenu(page);
   await page.getByRole("button", { name: "Inspect ↗" }).click();
   await page
@@ -69,7 +70,7 @@ test("settings has keyboard focus and explicit close preserves the open Claude q
 test("closing a panel restores the invoking control", async ({ page }) => {
   await mockClaudeStudy(page);
   await page.goto("/");
-  await page.waitForFunction(() => !!(window as any).__studyApp?.record);
+  await waitForStudyApp(page);
   await page.keyboard.press("Escape");
   await page.locator("#settings-toggle").click();
   await page.getByRole("button", { name: "Done", exact: true }).click();
@@ -92,7 +93,7 @@ test("menu submenus return home before Esc closes the menu", async ({
 }) => {
   await mockClaudeStudy(page);
   await page.goto("/");
-  await page.waitForFunction(() => !!(window as any).__studyApp?.record);
+  await waitForStudyApp(page);
   const inspect = page.locator("#curriculum-button"),
     settings = page.locator("#settings-toggle");
   await openAgentMenu(page);
@@ -124,7 +125,7 @@ test("menu submenus return home before Esc closes the menu", async ({
 test("Esc closes the bug report without opening the menu", async ({ page }) => {
   await mockClaudeStudy(page);
   await page.goto("/");
-  await page.waitForFunction(() => !!(window as any).__studyApp?.record);
+  await waitForStudyApp(page);
   await page.locator("[data-bug-report]").click();
   await expect(page.locator("#bug-report")).toBeVisible();
   await page.keyboard.press("Escape");

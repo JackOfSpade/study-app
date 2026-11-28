@@ -3,7 +3,7 @@
 import { expect, test } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import { openAgentMenu, openApp } from "./helpers/agent-menu";
-import { flushStudySave } from "./study-harness";
+import { flushStudySave, waitForStudyApp } from "./study-harness";
 
 // No browser case may accidentally release real model/bridge work.
 test.beforeEach(async ({ page }) => {
@@ -92,7 +92,7 @@ test("practical observations: unreviewed output is inert, persists without chang
   await page.locator("#close-inspector").click();
   await flushStudySave(page);
   await page.reload();
-  await page.waitForFunction(() => !!(window as any).__studyApp);
+  await waitForStudyApp(page);
   await openAgentMenu(page);
   await page.locator("#curriculum-button").click();
   await page.locator("#environment-observations summary").click();
@@ -168,7 +168,7 @@ test("environment packet survives an actual browser-storage write failure and ca
     "1 saved observation packet",
   );
   await page.reload();
-  await page.waitForFunction(() => !!(window as any).__studyApp);
+  await waitForStudyApp(page);
   expect(
     await page.evaluate(
       () =>
@@ -243,7 +243,7 @@ for (const { storageFailure, provider } of [
     await page.goto("/");
     // This review never needs the first-person city. Software WebGL makes
     // each of its frames cost seconds and starves every later UI step.
-    await page.waitForFunction(() => !!(window as any).__studyApp);
+    await waitForStudyApp(page);
     await page.evaluate(() => {});
     await openApp(page);
     const before = await page.evaluate(async () => {
@@ -361,7 +361,7 @@ for (const { storageFailure, provider } of [
     expect(text).not.toContain("window.badReview");
     expect(text).toContain("revision: 10");
     await page.reload();
-    await page.waitForFunction(() => !!(window as any).__studyApp);
+    await waitForStudyApp(page);
     await openAgentMenu(page);
     await page.locator("#curriculum-button").click();
     await page.locator("#environment-observations summary").click();

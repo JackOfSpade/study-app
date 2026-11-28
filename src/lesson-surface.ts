@@ -13,7 +13,7 @@
  * host.
  */
 import { checkBridge, status } from "./ai";
-import { $, setHtml, setNodeText, setText } from "./dom";
+import { $, formatElapsed, setHtml, setNodeText, setText } from "./dom";
 import { escapeHtml as escape } from "./html";
 import { encounterGaps, type KnowledgeGapRecord } from "./knowledge-probe";
 import { lessonGap, lessonOffer, openLessonGaps, type Lessons } from "./lesson";
@@ -50,10 +50,6 @@ const TEST_BLOCKED =
 const STAYS_OPEN = "This gap stays open until a question shows you have it.";
 const CLOSED = "This gap is closed. The lesson stays here to reread.";
 
-const clock = (ms: number) => {
-  const seconds = Math.max(0, Math.floor(ms / 1000));
-  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
-};
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
 
 export function createLessonSurface(host: LessonSurfaceHost) {
@@ -64,6 +60,7 @@ export function createLessonSurface(host: LessonSurfaceHost) {
   const statusBox = $("#lesson-status");
   const layout = $("#lesson .terminal-layout");
   const messages = $("#lesson-messages");
+  const announcer = $("#lesson-announce");
   const chatStatus = $("#lesson-chat-status");
   const input = $<HTMLTextAreaElement>("#lesson-chat-input");
   const readButton = $<HTMLButtonElement>("#lesson-read");
@@ -252,7 +249,7 @@ export function createLessonSurface(host: LessonSurfaceHost) {
     if (rec.state !== "pending") started.delete(clockKey);
     else if (elapsed) {
       if (!started.has(clockKey)) started.set(clockKey, Date.now());
-      setNodeText(elapsed, clock(Date.now() - started.get(clockKey)!));
+      setNodeText(elapsed, formatElapsed(Date.now() - started.get(clockKey)!));
     }
   }
 
@@ -452,6 +449,10 @@ export function createLessonSurface(host: LessonSurfaceHost) {
       messages.scrollHeight - messages.scrollTop - messages.clientHeight < 8;
     const newest = rec.chat[rec.chat.length - 1];
     const justSent = newest?.role === "learner" && newest.id !== chat.last;
+    // A reply that arrived since the last draw is said once; the chat itself
+    // is rewritten as a reply streams, so it is not a live region.
+    if (!fresh && newest?.role === "tutor" && newest.id !== chat.last)
+      announce("Tutor replied.");
     chat.last = newest?.id;
     // Follow the conversation unless the learner has scrolled up to reread.
     if (placeChat(wanted) && (fresh || atBottom || justSent))
@@ -469,6 +470,16 @@ export function createLessonSurface(host: LessonSurfaceHost) {
     );
     chatStatus.hidden = chatStatus.childElementCount === 0;
     input.disabled = rec.state !== "ready";
+  }
+
+  /** Says a short line to assistive technology once. */
+  function announce(text: string) {
+    announcer.textContent = "";
+    // A changed text is what a live region announces; clearing first lets the
+    // same line be announced again for the next reply.
+    requestAnimationFrame(() => {
+      announcer.textContent = text;
+    });
   }
 
   /** Sends a chat message. Says at once whether it was started; `rejected` is

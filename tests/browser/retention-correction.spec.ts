@@ -8,6 +8,7 @@ import {
   retentionCorrection,
   retentionFixture,
 } from "../helpers/retention-correction";
+import { waitForStudyApp } from "./study-harness";
 for (const removed of [0, 1])
   test(`explicit retention correction of review ${removed} preserves history through preview, adoption and reload`, async ({
     page,
@@ -54,8 +55,7 @@ for (const removed of [0, 1])
       await route.fulfill({ json: fixture.proposal(payload) });
     });
     await page.goto("/");
-    // The app's hooks appear only once its first load finishes.
-    await page.waitForFunction(() => !!(window as any).__studyApp);
+    await waitForStudyApp(page);
     await page.evaluate(async (saved) => {
       const root = "/src/",
         { decode, save } = await import(root + "persistence.ts");
@@ -121,7 +121,7 @@ for (const removed of [0, 1])
       "adopted and saved",
     );
     await page.reload();
-    await page.waitForFunction(() => !!(window as any).__studyApp);
+    await waitForStudyApp(page);
     const saved = await page.evaluate((scope) => {
       const s = (window as any).__studyApp.record.study;
       return {

@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises";
 import { decode, encode, recover } from "../../src/persistence";
 import { inspectMergedDocument } from "../../src/roadmap-structure";
 import { setup, withdraw } from "../helpers/observation-withdrawal";
+import { waitForStudyApp } from "./study-harness";
 for (const outcome of ["assisted", "contradicted"] as const) {
   test(`reviewed ${outcome} observation retraction preserves audit and unknown status through explicit adoption and reload`, async ({
     page,
@@ -64,6 +65,7 @@ for (const outcome of ["assisted", "contradicted"] as const) {
       });
     });
     await page.goto("/");
+    await waitForStudyApp(page);
     await page.evaluate(async (saved) => {
       const root = "/src/",
         { save, decode } = await import(root + "persistence.ts");
@@ -72,7 +74,7 @@ for (const outcome of ["assisted", "contradicted"] as const) {
       await save(current);
     }, encode(g));
     await page.reload();
-    await page.waitForFunction(() => !!(window as any).__studyApp);
+    await waitForStudyApp(page);
     const before = await page.evaluate(() =>
       JSON.stringify((window as any).__studyApp.record.study.learner),
     );
@@ -126,7 +128,7 @@ for (const outcome of ["assisted", "contradicted"] as const) {
       "adopted and saved",
     );
     await page.reload();
-    await page.waitForFunction(() => !!(window as any).__studyApp);
+    await waitForStudyApp(page);
     const result = await page.evaluate(() => {
       const g = (window as any).__studyApp.record,
         l = g.study.learner;

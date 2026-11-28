@@ -4,6 +4,7 @@ import {
   mockClaudeStudy,
   openStudyQuestion,
   studyState,
+  waitForStudyApp,
 } from "./study-harness";
 
 test("a reply that cannot be accepted keeps the exact request and its retry completes once", async ({
@@ -40,7 +41,7 @@ test("a reply that cannot be accepted keeps the exact request and its retry comp
   ).toBe(true);
   await flushStudySave(page);
   await page.reload();
-  await page.waitForFunction(() => !!(window as any).__studyApp);
+  await waitForStudyApp(page);
   expect((await studyState(page, id)).submissions).toBe(1);
   expect(relay.tutorCalls()).toHaveLength(2);
   expect(errors).toEqual([]);

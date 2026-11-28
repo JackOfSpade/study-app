@@ -3,6 +3,7 @@ import {
   flushStudySave,
   mockClaudeStudy,
   openStudyQuestion,
+  waitForStudyApp,
 } from "./study-harness";
 
 const help = { nudges: [], hints: [], gives: [], offers: [] };
@@ -135,7 +136,7 @@ async function solveThreePart(page: Page) {
 async function reloadPage(page: Page) {
   await flushStudySave(page);
   await page.reload();
-  await page.waitForFunction(() => !!(window as any).__studyApp?.record);
+  await waitForStudyApp(page);
 }
 
 test("reload during a pending assessment: it is sent again by itself, unchanged, and applies", async ({

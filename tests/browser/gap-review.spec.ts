@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { mockClaudeStudy } from "./study-harness";
+import { mockClaudeStudy, waitForStudyApp } from "./study-harness";
 
 test("a gap answered after the question finished shows as closed in chat and in the status line", async ({
   page,
@@ -14,7 +14,7 @@ test("a gap answered after the question finished shows as closed in chat and in 
     });
   });
   await page.goto("/");
-  await page.waitForFunction(() => !!(window as any).__studyApp);
+  await waitForStudyApp(page);
   await page.evaluate(() => {
     (window as any).__studyApp.record.study.profile = "live";
   });

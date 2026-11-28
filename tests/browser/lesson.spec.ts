@@ -4,6 +4,7 @@ import {
   flushStudySave,
   lessonFixture,
   mockClaudeStudy,
+  waitForStudyApp,
 } from "./study-harness";
 
 type Study = Awaited<ReturnType<typeof mockClaudeStudy>>;
@@ -554,7 +555,7 @@ test("after a reload the lesson is still there, read from its own database", asy
   await page.locator("#lesson-close").click();
   await flushStudySave(page);
   await page.reload();
-  await page.waitForFunction(() => !!(window as any).__studyApp);
+  await waitForStudyApp(page);
   const list = page.locator("#study-gaps");
   await expect(list).toBeVisible();
   await expect(list.locator("summary")).toContainText("Gaps to study (1)");
@@ -660,7 +661,7 @@ test("a practice question survives a reload as the open question", async ({
     .toBe(true);
   const generated = study.generateCalls().length;
   await page.reload();
-  await page.waitForFunction(() => !!(window as any).__studyApp);
+  await waitForStudyApp(page);
   await expect(page.locator("#terminal")).toBeVisible();
   await expect(page.locator("#terminal-provenance")).toContainText(
     "Practice question",
@@ -826,7 +827,7 @@ test("closing a lesson opened from the map's list returns focus to that gap's bu
   await page.locator("#lesson-close").click();
   await flushStudySave(page);
   await page.reload();
-  await page.waitForFunction(() => !!(window as any).__studyApp);
+  await waitForStudyApp(page);
   const list = page.locator("#study-gaps");
   await list.locator("summary").click();
   await list.locator("button").click();

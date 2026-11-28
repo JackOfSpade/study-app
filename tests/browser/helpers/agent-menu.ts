@@ -1,4 +1,5 @@
 import type { Page } from "@playwright/test";
+import { waitForStudyApp } from "../study-harness";
 
 /** Agent diagnostics stay available to synthetic browser fixtures without
  * adding developer controls to the normal learner menu. */
@@ -12,7 +13,7 @@ export async function openAgentMenu(page: Page) {
 /** The app is the study workspace: open it and wait for its saved record. */
 export async function openApp(page: Page) {
   await page.goto("/");
-  await page.waitForFunction(() => !!(window as any).__studyApp?.record);
+  await waitForStudyApp(page);
 }
 
 /** Give the open record the four unasked questions that fixtures name

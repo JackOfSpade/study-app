@@ -331,12 +331,19 @@ export async function mockClaudeStudy(
   };
 }
 
+/** Wait for the app's test hooks. `window.__studyApp` appears only after the
+ * app's top-level awaits (saved record, lessons, bridge check), which can
+ * finish after the load event that `goto` and `reload` wait for. */
+export async function waitForStudyApp(page: Page) {
+  await page.waitForFunction(() => !!(window as any).__studyApp?.record);
+}
+
 /** Open the app and ask for the next question through the workspace's own
  * button. With the synthetic relay the question arrives at once; the returned
  * id is the encounter the learner now has open. */
 export async function openStudyQuestion(page: Page) {
   await page.goto("/");
-  await page.waitForFunction(() => !!(window as any).__studyApp);
+  await waitForStudyApp(page);
   await page.locator("#study-next").click();
   await expect(page.locator("#terminal")).toBeVisible();
   await expect(page.locator("#problem-title")).not.toHaveText("Connecting…");

@@ -5,6 +5,7 @@ import {
   flushStudySave,
   mockClaudeStudy,
   openStudyQuestion,
+  waitForStudyApp,
 } from "./study-harness";
 
 async function rawDurableSave(page: Page) {
@@ -22,7 +23,7 @@ test("a failed full-record import reports a clear unsaved warning", async ({
 }) => {
   await mockClaudeStudy(page);
   await page.goto("/");
-  await page.waitForFunction(() => !!(window as any).__studyApp?.record);
+  await waitForStudyApp(page);
   await page.evaluate(() => (window as any).__studyApp.openAgentMenu());
   await page.locator("#settings-toggle").click();
   const { candidate, originalSeq, originalLocal } = await page.evaluate(
@@ -80,7 +81,7 @@ test("a failed full-record import reports a clear unsaved warning", async ({
     })),
   ).toEqual({ seq: originalSeq + 321, local: originalLocal });
   await page.reload();
-  await page.waitForFunction(() => !!(window as any).__studyApp?.record);
+  await waitForStudyApp(page);
   expect(await page.evaluate(() => (window as any).__studyApp.record.seq)).toBe(
     originalSeq,
   );
@@ -107,6 +108,7 @@ test("hiding the study tab synchronously checkpoints incomplete local work", asy
   }, id);
   expect(checkpoint).toBe("Synthetic unfinished local reasoning");
   await page.reload();
+  await waitForStudyApp(page);
   await expect(page.locator("#study-workspace")).toBeVisible();
   expect(
     await page.evaluate(
@@ -127,6 +129,7 @@ test("an unreadable checkpoint stays protected through lifecycle saves until a v
     }
   });
   await page.goto("/");
+  await waitForStudyApp(page);
   await expect(page.locator("#save-recovery-status")).toContainText(
     "Existing checkpoints have been protected",
   );
@@ -184,6 +187,7 @@ test("an unreadable checkpoint stays protected through lifecycle saves until a v
   await expect(page.locator("#save-recovery")).toBeHidden();
   await expect(page.locator("#study-workspace")).toBeVisible();
   await page.reload();
+  await waitForStudyApp(page);
   await expect(page.locator("#study-workspace")).toBeVisible();
   expect(
     await page.evaluate(
@@ -198,7 +202,7 @@ test("a damaged copy beside a valid one is offered for download before a save re
 }) => {
   await mockClaudeStudy(page);
   await page.goto("/");
-  await page.waitForFunction(() => !!(window as any).__studyApp?.record);
+  await waitForStudyApp(page);
   const noticeHidden = () =>
     page.evaluate(
       () => document.querySelector<HTMLElement>("#study-load-notice")!.hidden,
@@ -215,7 +219,7 @@ test("a damaged copy beside a valid one is offered for download before a save re
     }
   });
   await page.reload();
-  await page.waitForFunction(() => !!(window as any).__studyApp?.record);
+  await waitForStudyApp(page);
   expect(await noticeHidden()).toBe(false);
   // Saving goes on as usual and replaces the damaged bytes in storage...
   await page.evaluate(() => window.dispatchEvent(new Event("blur")));
@@ -240,7 +244,7 @@ test("durable saves retain a large draft beyond localStorage capacity", async ({
 }) => {
   await mockClaudeStudy(page);
   await page.goto("/");
-  await page.waitForFunction(() => !!(window as any).__studyApp?.record);
+  await waitForStudyApp(page);
   const size = 8_000_000;
   await page.evaluate(async (size) => {
     const { question } = await import(
@@ -260,7 +264,7 @@ test("durable saves retain a large draft beyond localStorage capacity", async ({
     { timeout: 15000 },
   );
   await page.reload();
-  await page.waitForFunction(() => !!(window as any).__studyApp);
+  await waitForStudyApp(page);
   expect(
     await page.evaluate(
       () =>
@@ -281,7 +285,7 @@ test("a save under the earlier storage names loads and then moves to the new nam
     );
   await mockClaudeStudy(page);
   await page.goto("/");
-  await page.waitForFunction(() => !!(window as any).__studyApp?.record);
+  await waitForStudyApp(page);
   await flushStudySave(page);
   // Reading the earlier names must never create the earlier database.
   expect(await legacyDatabase()).toBe(false);
@@ -315,7 +319,7 @@ test("a save under the earlier storage names loads and then moves to the new nam
     return serial;
   });
   await page.reload();
-  await page.waitForFunction(() => !!(window as any).__studyApp?.record);
+  await waitForStudyApp(page);
   expect(
     await page.evaluate(
       () =>
@@ -332,7 +336,7 @@ test("a save under the earlier storage names loads and then moves to the new nam
     seeded,
   );
   await page.reload();
-  await page.waitForFunction(() => !!(window as any).__studyApp?.record);
+  await waitForStudyApp(page);
   expect(
     await page.evaluate(
       () =>

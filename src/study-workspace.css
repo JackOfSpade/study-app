@@ -622,7 +622,7 @@ html.study-only body {
   }
 }
 
-/* Level-up reveal after a question's progress assessment is saved. */
+/* Progress reveal after a question's progress assessment is saved. */
 .study-reveal-banner {
   padding: 12px 20px;
   text-align: center;

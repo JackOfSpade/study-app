@@ -3,6 +3,7 @@ import { openAgentMenu, openApp, seedQuestions } from "./helpers/agent-menu";
 import { expect, test } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import { reviewRoadmap } from "../../src/roadmap-review";
+import { waitForStudyApp } from "./study-harness";
 
 // The editor was removed from the workspace. These scoped API fixtures keep
 // reconciliation's captured-work transaction covered through the actual browser
@@ -391,7 +392,7 @@ for (const scenario of ["unchanged", "stale", "new-work"])
     );
     await page.locator("#menu-close").click();
     await page.reload();
-    await page.waitForFunction(() => !!(window as any).__studyApp);
+    await waitForStudyApp(page);
     expect(
       await page.evaluate(() => {
         const g = (window as any).__studyApp.record;

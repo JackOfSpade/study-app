@@ -2,6 +2,7 @@ import { openAgentMenu } from "./helpers/agent-menu";
 import { expect, test } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import { localHandoff } from "../helpers/local-handoff";
+import { waitForStudyApp } from "./study-harness";
 
 test("Claude CLI roadmap review survives reload with exact files and provider, then requires explicit adoption", async ({
   page,
@@ -63,9 +64,7 @@ test("Claude CLI roadmap review survives reload with exact files and provider, t
         "| Learner | Synthetic administrative review; Mid-level",
       );
     await page.goto("/");
-    // The app exposes __studyApp only after its top-level bridge/log awaits,
-    // which can finish after the load event that goto waits for.
-    await page.waitForFunction(() => !!(window as any).__studyApp);
+    await waitForStudyApp(page);
     await page.evaluate(async () => {
       const root = "/src/",
         { createRecord } = await import(
@@ -155,7 +154,7 @@ test("Claude CLI roadmap review survives reload with exact files and provider, t
       "adopted and saved",
     );
     await page.reload();
-    await page.waitForFunction(() => !!(window as any).__studyApp);
+    await waitForStudyApp(page);
     const saved = await page.evaluate(() => {
       const s = (window as any).__studyApp.record.study;
       return {

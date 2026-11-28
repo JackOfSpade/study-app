@@ -166,11 +166,8 @@ const lessons = createLessons({
   capabilities: () => status().capabilities,
   onChange: () => lessonSurface?.render(),
 });
-try {
-  await lessons.load();
-} catch {
-  // createLessons reports a failed read itself; the app starts regardless.
-}
+// load() never rejects: a failed read is reported through loadError().
+await lessons.load();
 // Replies, completions, gradings and a failed fallback save copy are logged
 // as they settle, so a later report can be checked against the saved record.
 watchStudyEvents((type, data) => {

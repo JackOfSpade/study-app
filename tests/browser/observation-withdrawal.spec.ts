@@ -8,6 +8,7 @@ import {
   readIdentifierCounters,
 } from "../../src/roadmap-identifiers";
 import { inspectMergedDocument } from "../../src/roadmap-structure";
+import { waitForStudyApp } from "./study-harness";
 const task =
   "| S0007-A98 | S0007 / 2026-10-16 | T01 changed-context assessment | PARTIAL; task remains open | S0007-EV98 | Synthetic task |";
 const excerpt =
@@ -228,7 +229,7 @@ test("reviewed source invalidation withdraws a prior imported pass without learn
     "adopted and saved",
   );
   await page.reload();
-  await page.waitForFunction(() => !!(window as any).__studyApp);
+  await waitForStudyApp(page);
   const result = await page.evaluate(() => {
     const g = (window as any).__studyApp.record;
     return {

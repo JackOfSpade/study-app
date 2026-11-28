@@ -7,6 +7,7 @@ import {
   laterId,
   laterScope,
 } from "../helpers/later-baseline-evidence";
+import { waitForStudyApp } from "./study-harness";
 test("correcting an older original score retains an actually recorded later pass and review interval through UI adoption and reload", async ({
   page,
 }) => {
@@ -33,6 +34,7 @@ test("correcting an older original score retains an actually recorded later pass
     await route.fulfill({ json: fixture.proposal(payload) });
   });
   await page.goto("/");
+  await waitForStudyApp(page);
   await page.evaluate(async (raw) => {
     const root = "/src/",
       { decode, save } = await import(root + "persistence.ts"),
@@ -41,7 +43,7 @@ test("correcting an older original score retains an actually recorded later pass
     await save(current);
   }, encode(g));
   await page.reload();
-  await page.waitForFunction(() => !!(window as any).__studyApp);
+  await waitForStudyApp(page);
   await openAgentMenu(page);
   await page.locator("#curriculum-button").click();
   await page.getByText("Review an updated roadmap", { exact: true }).click();
@@ -75,7 +77,7 @@ test("correcting an older original score retains an actually recorded later pass
     "adopted and saved",
   );
   await page.reload();
-  await page.waitForFunction(() => !!(window as any).__studyApp);
+  await waitForStudyApp(page);
   const after = await page.evaluate(() => {
     const l = (window as any).__studyApp.record.study.learner;
     return {

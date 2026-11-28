@@ -1,11 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
-import { mockClaudeStudy } from "./study-harness";
+import { mockClaudeStudy, waitForStudyApp } from "./study-harness";
 
 async function openStudyQuestion(page: Page) {
   await mockClaudeStudy(page);
   await page.goto("/");
   // The hook appears only after the saved record has loaded.
-  await page.waitForFunction(() => !!(window as any).__studyApp);
+  await waitForStudyApp(page);
   await page.evaluate(() => {
     (window as any).__studyApp.record.study.profile = "live";
   });
@@ -145,7 +145,7 @@ test("a finished question stays open with a marker in chat, and the map reveal w
   });
   await page.goto("/");
   // The hook appears only after the saved record has loaded.
-  await page.waitForFunction(() => !!(window as any).__studyApp);
+  await waitForStudyApp(page);
   await page.evaluate(() => {
     (window as any).__studyApp.record.study.profile = "live";
   });

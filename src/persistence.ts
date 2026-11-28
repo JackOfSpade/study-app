@@ -347,7 +347,7 @@ export function recover(g: StudyRecord) {
     e.chatOpen = false;
     // resume-work.ts resends a request carrying exactly this note.
     interruptPending(e.tutorRequests, RESTARTED_TUTOR);
-    // Older saves could carry a previous run's open question into a fresh run.
+    // Older saves could carry an earlier session's open question into a fresh start.
     // Preserve its artifacts while removing the obsolete completion obligation.
     if (archived.has(e)) closeDirectStudy(e);
     recoverDirectStudy(e);

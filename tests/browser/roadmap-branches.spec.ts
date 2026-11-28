@@ -7,6 +7,7 @@ import {
   readIdentifierCounters,
 } from "../../src/roadmap-identifiers";
 import { inspectMergedDocument } from "../../src/roadmap-structure";
+import { waitForStudyApp } from "./study-harness";
 const task =
   "| S0007-A98 | S0007 / 2026-10-16 | T02.1 D1 local branch task | PENDING; no inference | — | Synthetic task |";
 const observation =
@@ -173,7 +174,7 @@ test("source-qualified branch review exposes unresolved history, downloads exact
     "adopted and saved",
   );
   await page.reload();
-  await page.waitForFunction(() => !!(window as any).__studyApp);
+  await waitForStudyApp(page);
   const result = await page.evaluate(() => {
     const g = (window as any).__studyApp.record;
     return {
