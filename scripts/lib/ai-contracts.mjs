@@ -15,6 +15,7 @@ import {
   PARTS_TUTOR_GUIDANCE,
   partReplyProblem,
   compoundPartProblem,
+  promptPreviewProblem,
   partsProblem,
   partSizeProblem,
   PART_SOLVE_SECONDS_MAX,
@@ -315,8 +316,12 @@ export function validateAnswer(job, answer, { final = false } = {}) {
           partsProblem(answer.parts) ??
           (final
             ? undefined
-            : // Both are reported together: the reply gets one correction.
-              [compoundPartProblem(answer.parts), partSizeProblem(answer)]
+            : // All are reported together: the reply gets one correction.
+              [
+                compoundPartProblem(answer.parts),
+                promptPreviewProblem(answer.prompt, answer.parts),
+                partSizeProblem(answer),
+              ]
                 .filter(Boolean)
                 .join(" ") || undefined);
         if (parts) fail(parts);

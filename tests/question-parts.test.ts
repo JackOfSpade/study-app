@@ -8,6 +8,7 @@ import {
   composePrompt,
   partReplyProblem,
   compoundPartProblem,
+  promptPreviewProblem,
   partRequests,
   partsProblem,
   stagedParts,
@@ -391,5 +392,33 @@ test("a part that asks for more than one thing is sent back, a single ask is not
   assert.equal(
     partRequests("```py\n# Give x? List y.\n```\nWhat does it print?").length,
     1,
+  );
+});
+
+test("a shared prompt that previews what the parts ask is sent back, scenario facts are not", () => {
+  // From the 2026-11-28 generate quality loop, round 4: a label block in the
+  // prompt that restated and defined the four parts' asks.
+  assert.match(
+    promptPreviewProblem(
+      "A PM asks for a Remove background button.\n\nYou'll restate this request with four labels:\n- user outcome: what the user achieves.",
+      ["Write the user outcome.", "Name one constraint."],
+    ) ?? "",
+    /^prompt tells the learner what the parts will ask \('You'll restate'\)/,
+  );
+  assert.match(
+    promptPreviewProblem("Your task is to classify three values.", ["A?"]) ??
+      "",
+    /'Your task is to'/,
+  );
+  for (const prompt of [
+    "You will be given an integer array `nums`.",
+    "After saving, you'll see a toast.",
+    "```js\n// you'll answer this later\n```",
+  ])
+    assert.equal(promptPreviewProblem(prompt, ["What happens?"]), undefined);
+  // A question shown whole keeps its ask in prompt.
+  assert.equal(
+    promptPreviewProblem("You'll explain the bug below.", undefined),
+    undefined,
   );
 });

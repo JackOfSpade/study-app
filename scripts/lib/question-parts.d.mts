@@ -5,6 +5,10 @@ export function partsProblem(parts: unknown): string | undefined;
 export function partSizeProblem(answer: unknown): string | undefined;
 export function partRequests(part: unknown): string[];
 export function compoundPartProblem(parts: unknown): string | undefined;
+export function promptPreviewProblem(
+  prompt: unknown,
+  parts: unknown,
+): string | undefined;
 export function composePrompt(shared: string, parts: string[]): string;
 export function stagedParts(problem: unknown): string[] | undefined;
 export function closesPart(

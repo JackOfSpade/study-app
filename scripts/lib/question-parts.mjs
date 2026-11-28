@@ -125,6 +125,25 @@ export function compoundPartProblem(parts) {
   return undefined;
 }
 
+// The shared material telling the learner what the parts will ask ("You'll
+// restate this request with four labels: ..."), as opposed to a fact about
+// the scenario ("you'll see a toast", "You will be given an array").
+const FORETOLD =
+  /\b(?:you(?:'ll|\u2019ll| will| are going to)\s+(?:then |now |next |first )?(?:be asked|restate|label|classify|sort|answer|explain|describe|identify|name|write|choose|pick|decide|propose|list|state|rank|compare|implement)\b|your (?:task|job) (?:is|will be) to\b)/i;
+
+/** Why the shared prompt of a question worked in parts previews or defines
+ * what its parts ask, or undefined. Like compoundPartProblem, advice for one
+ * correction, never grounds to refuse a question outright. */
+export function promptPreviewProblem(prompt, parts) {
+  if (typeof prompt !== "string" || !Array.isArray(parts)) return undefined;
+  const prose = prompt
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`[^`\n]*`/g, "x");
+  const found = FORETOLD.exec(prose);
+  if (!found) return undefined;
+  return `prompt tells the learner what the parts will ask ('${found[0]}'). prompt holds the shared facts only and asks nothing: cut every sentence that previews, lists or defines the asks, and let each part's own words carry its ask, so the learner does not read the instructions twice or get a definition the part tests.`;
+}
+
 /** The whole question as one text: what every reader other than the staged
  * display uses (assessment, history, reports). */
 export function composePrompt(shared, parts) {

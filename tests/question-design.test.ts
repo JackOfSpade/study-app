@@ -330,7 +330,7 @@ test("a question has no total time limit, but each part does", () => {
   // named, and prompts or asks gave the tested insight away.
   assert.match(
     instructions,
-    /Check each line against the shortest complete correct answer to its ask as worded, which must satisfy it: a line for a diagnosis never also requires the remedy/,
+    /Check each line against the shortest complete correct answer to its ask as worded, and against a second correct answer that takes another route \(another construct, grouping or qualifying property\); both must satisfy it: a line for a diagnosis never also requires the remedy/,
   );
   assert.match(
     instructions,
@@ -367,7 +367,7 @@ test("a question has no total time limit, but each part does", () => {
   );
   assert.match(
     instructions,
-    /such as specific figures, a named caveat, a format, a length, 'smallest', 'for any input' or grounding in a named fact, the ask names it/,
+    /such as specific figures, a named caveat, a format, a length, a granularity \('one behaviour per pull request'\), 'smallest', 'for any input' or grounding in a named fact, the ask names it/,
   );
   assert.match(
     instructions,
@@ -395,7 +395,7 @@ test("a question has no total time limit, but each part does", () => {
   );
   assert.match(
     instructions,
-    /a line never joins with 'and' two findings either of which answers the ask; and a reason the line requires is any reason the facts support unless the ask names one/,
+    /a line never joins with 'and' two findings either of which answers the ask, so an ask for one property, reason or difference accepts any one the facts support, worded with 'such as'; and a reason the line requires is any reason the facts support unless the ask names one/,
   );
   assert.match(
     instructions,
@@ -412,6 +412,43 @@ test("a question has no total time limit, but each part does", () => {
   assert.match(
     instructions,
     /a premise a part adds keeps in play what the part tests/,
+  );
+  // Round 4 (6 of 12 passed): a line banning `any` where correct answers use
+  // it, a granularity the ask never named, several properties joined for an
+  // ask for one, a reason for an error that is no longer shown, asks naming
+  // the kind of answer or saying the items differ, and a prompt that
+  // previewed the parts' asks.
+  assert.match(
+    instructions,
+    /and against a second correct answer that takes another route \(another construct, grouping or qualifying property\); both must satisfy it/,
+  );
+  assert.match(
+    instructions,
+    /never bans a construct, keyword or technique the ask does not rule out/,
+  );
+  assert.match(
+    instructions,
+    /a granularity \('one behaviour per pull request'\)/,
+  );
+  assert.match(
+    instructions,
+    /an ask for one property, reason or difference accepts any one the facts support, worded with 'such as'/,
+  );
+  assert.match(
+    instructions,
+    /a line for why something is shown never requires why something else is not/,
+  );
+  assert.match(
+    instructions,
+    /names the kind of answer being tested \('replace it with the native element'/,
+  );
+  assert.match(
+    instructions,
+    /hints how many cases or kinds there are or that they differ \('as three different kinds'\)/,
+  );
+  assert.match(
+    instructions,
+    /the prompt never previews, lists or defines what the parts will ask for/,
   );
   assert.match(
     taskInstructions("assess", { contract }) as string,
