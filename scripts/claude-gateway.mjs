@@ -77,7 +77,9 @@ const TASK_PROFILES = Object.freeze({
     compactStableKeys: ["instruction", "responseFormat", "learning", "problem"],
   },
   assess: {
-    ...live(5 * 60_000, "haiku", "high"),
+    // Sonnet low: Haiku high credited a flawed part the tutor had confirmed
+    // in 9-10 of 49 cases, Sonnet low in 1 (2026-11-28, docs/AI_MODEL_SELECTION.md).
+    ...live(5 * 60_000, "sonnet", "low"),
     stableKeys: ["assessmentCriteria", "curriculum", "problem"],
   },
   "review-environment": {
