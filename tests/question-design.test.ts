@@ -195,7 +195,15 @@ test("the relay accepts a contract copy that keeps what the app checks, and name
     starter: "",
     rubric: ["Names the cost."],
     contract: copy,
-    scopeDefinitions: [{ id: "s" }],
+    scopeDefinitions: [
+      {
+        id: "PY:T11.1/D1",
+        objectiveId: "PY:T11.1",
+        depth: 1,
+        sourceScope: "A long scope sentence the model may retype.",
+        facets: [{ id: "core", description: "The core idea." }],
+      },
+    ],
     partSolveSeconds: [60],
   });
   validateAnswer(job, reply(contract));
@@ -231,7 +239,11 @@ test("the relay accepts a contract copy that keeps what the app checks, and name
 });
 
 test("a question has no total time limit, but each part does", () => {
-  const contract = { id: "synthetic-sitting", depth: 2 };
+  const contract = {
+    id: "synthetic-sitting",
+    objectiveIds: ["PE:T01.1"],
+    depth: 2,
+  };
   const job = { operation: "generate", payload: { contract } };
   const answer = (estimatedSolveSeconds: number, partSolveSeconds = [60]) => ({
     title: "Late deliveries report",
@@ -239,7 +251,14 @@ test("a question has no total time limit, but each part does", () => {
     starter: "",
     rubric: ["Names the race."],
     contract,
-    scopeDefinitions: [{ id: "s" }],
+    scopeDefinitions: [
+      {
+        id: "PE:T01.1/D2",
+        objectiveId: "PE:T01.1",
+        depth: 2,
+        facets: [{ id: "core", description: "The core idea." }],
+      },
+    ],
     estimatedSolveSeconds,
     partSolveSeconds,
   });

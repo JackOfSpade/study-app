@@ -474,8 +474,8 @@ test("a shared prompt that previews what the parts ask is sent back, scenario fa
   );
 });
 
-test("generate refuses a facet id the app would refuse, inside the same call", () => {
-  const contract = { track: "PE", depth: 1 };
+test("generate refuses scope definitions the app would refuse, inside the same call", () => {
+  const contract = { track: "PE", depth: 1, objectiveIds: ["PE:T01.1"] };
   const reply = (id: string) => ({
     title: "t",
     prompt: "p",
@@ -484,7 +484,12 @@ test("generate refuses a facet id the app would refuse, inside the same call", (
     parts: ["One?"],
     contract,
     scopeDefinitions: [
-      { id: "PE:T01.1/D1", facets: [{ id, description: "d" }] },
+      {
+        id: "PE:T01.1/D1",
+        objectiveId: "PE:T01.1",
+        depth: 1,
+        facets: [{ id, description: "d" }],
+      },
     ],
   });
   const job = { operation: "generate", payload: { contract } };
@@ -496,6 +501,19 @@ test("generate refuses a facet id the app would refuse, inside the same call", (
     );
   assert.doesNotThrow(() =>
     validateAnswer(job, reply("responsibility-boundary"), { final: true }),
+  );
+  // A real Opus reply on 2026-11-28 used the contract id as the scope id.
+  const wrongScope = reply("core");
+  wrongScope.scopeDefinitions[0].id = "live-0-PE:T01.1/D1";
+  assert.throws(
+    () => validateAnswer(job, wrongScope, { final: true }),
+    /scopeDefinitions id must be exactly "PE:T01.1\/D1"/,
+  );
+  const otherObjective = reply("core");
+  otherObjective.scopeDefinitions[0].objectiveId = "PE:T02.1";
+  assert.throws(
+    () => validateAnswer(job, otherObjective, { final: true }),
+    /not one of the contract's objectiveIds/,
   );
   assert.match(
     taskInstructions("generate", { contract }) as string,

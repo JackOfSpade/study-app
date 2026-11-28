@@ -1,5 +1,11 @@
-import { FACET_ID } from "../scripts/lib/facet-id.mjs";
+import {
+  FACET_ID,
+  isFinalTarget,
+  scopeKey,
+} from "../scripts/lib/scope-ids.mjs";
 import type { Provider, Contract, Track } from "./model";
+
+export { isFinalTarget, scopeKey };
 export type CellState = "U" | "G" | "P" | "R" | "—";
 export interface ScopeDefinition {
   id: string;
@@ -42,16 +48,12 @@ interface FinalProgress {
   facets: Record<string, FacetProof>;
   sourceRefs: string;
 }
-export const isFinalTarget = (id: string) =>
-  /^(PY|PE):(?:[TX]\d{2}|I\d{2})$/.test(id);
 export const reviewSignature = (record: ReviewRecord | undefined) =>
   JSON.stringify(
     Object.entries(record ?? {})
       .filter(([, v]) => v !== undefined)
       .sort(([a], [b]) => a.localeCompare(b)),
   );
-export const scopeKey = (id: string, depth: number) =>
-  `${id}/${isFinalTarget(id) ? "T4" : `D${depth}`}`;
 /** The track an objective or requirement id belongs to. */
 export const trackOf = (id: string): Track =>
   id.startsWith("PY:") ? "PY" : "PE";

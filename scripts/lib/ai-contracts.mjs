@@ -10,7 +10,7 @@ import {
 import { validProbeKnowledge, validProbeOutcome } from "./probe-reply.mjs";
 import { HELP_GATE_GUIDANCE, helpGateProblem } from "./help-gate.mjs";
 import { isRecord as object } from "./is-record.mjs";
-import { FACET_ID } from "./facet-id.mjs";
+import { scopeDefinitionProblem } from "./scope-ids.mjs";
 import {
   PARTS_GENERATION_GUIDANCE,
   PARTS_TUTOR_GUIDANCE,
@@ -289,14 +289,11 @@ export function validateAnswer(job, answer, { final = false } = {}) {
           "Return title, prompt and starter strings, rubric as an array of strings, and full scopeDefinitions",
         );
       {
-        const bad = answer.scopeDefinitions
-          .flatMap((d) => (Array.isArray(d?.facets) ? d.facets : []))
-          .map((f) => f?.id)
-          .find((id) => typeof id !== "string" || !FACET_ID.test(id));
-        if (bad !== undefined)
-          fail(
-            `Facet id ${JSON.stringify(bad)} is not allowed: use a short slug of letters, digits, '-', '_' or '.' (for example boundary-case), with no ':' or '/'`,
-          );
+        const scope = scopeDefinitionProblem(
+          job.payload.contract,
+          answer.scopeDefinitions,
+        );
+        if (scope) fail(scope);
       }
       {
         // The app keeps its own contract and discards the reply's copy, so
