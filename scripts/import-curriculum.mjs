@@ -31,5 +31,5 @@ try {
 // a running study request whenever a build/test preflight runs.
 if (previous !== serialized) writeFileSync(output, serialized);
 console.log(
-  `Verified revision 9; PY ${result.tracks.PY.objectives.length}, PE ${result.tracks.PE.objectives.length}; source and 3 protected digests intact.`,
+  `Verified revision ${result.revision}; PY ${result.tracks.PY.objectives.length}, PE ${result.tracks.PE.objectives.length}; source and 3 protected digests intact.`,
 );

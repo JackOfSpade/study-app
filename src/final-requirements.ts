@@ -4,6 +4,7 @@ import { importedEnvironmentEvidence } from "./imported-proof";
 import { scopeKey, type CellState, type LearnerLedger } from "./learning-model";
 import type { Roadmap, Track } from "./model";
 import { baselineCheckpointValid } from "./observation-validity";
+import { gapRows, sectionBody } from "./roadmap-structure";
 import { tableCells } from "./table-row";
 
 export interface FinalRequirement {
@@ -18,12 +19,12 @@ export interface FinalRequirement {
   remaining: string;
 }
 
+const missingSection = (heading: string) =>
+  Error(`Missing authoritative progress section ${heading}`);
 function section(progress: string, heading: string) {
-  const marker = `### ${heading}\n`;
-  const start = progress.indexOf(marker);
-  if (start < 0)
-    throw Error(`Missing authoritative progress section ${heading}`);
-  return progress.slice(start + marker.length).split("\n### ")[0];
+  const body = sectionBody(progress, heading);
+  if (body === undefined) throw missingSection(heading);
+  return body;
 }
 function rows(text: string, pattern: RegExp) {
   return text
@@ -285,13 +286,10 @@ export function curriculumReadiness(
   const transfers = category("transfer"),
     integrations = category("integration"),
     environment = category("environment");
-  const unresolvedMaterialGaps = rows(
-    section(
-      r.tracks[track].progress,
-      "0.6 Facet gaps, unknowns, and dependencies",
-    ),
-    /^\| G\d+ \|/,
-  )
+  const gaps = gapRows(r.tracks[track].progress);
+  if (!gaps) throw missingSection("0.6 Facet gaps, unknowns, and dependencies");
+  const unresolvedMaterialGaps = gaps
+    .map(tableCells)
     .filter((c) => {
       // A truncated row has no status cell: it stays unresolved.
       if (c[6]?.startsWith("CLOSED")) return false;

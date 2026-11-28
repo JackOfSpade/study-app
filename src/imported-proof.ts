@@ -14,7 +14,7 @@ import type {
   RoadmapAdoptionReceipt,
 } from "./roadmap-adoption-types";
 import { isAssessedToken, isAssessedTokenFor } from "./roadmap-export-names";
-import { receiptRows } from "./roadmap-structure";
+import { blockText, receiptRows } from "./roadmap-structure";
 import { tableCells } from "./table-row";
 
 export { adoptedSourceText };
@@ -191,10 +191,14 @@ export function importedProofValid(
   return false;
 }
 
-const adoptedTrackProgress = (l: LearnerLedger | undefined, track: Track) =>
-  adoptedSourceText(l)
-    ?.split(`<!-- BEGIN ${track}_PROGRESS -->`)[1]
-    ?.split(`<!-- END ${track}_PROGRESS -->`)[0];
+/** The adopted source's progress block for a track, if a source was adopted. */
+export const adoptedTrackProgress = (
+  l: LearnerLedger | undefined,
+  track: Track,
+) => {
+  const text = adoptedSourceText(l);
+  return text === undefined ? undefined : blockText(text, `${track}_PROGRESS`);
+};
 
 export const trackProgressContext = (
   l: LearnerLedger | undefined,

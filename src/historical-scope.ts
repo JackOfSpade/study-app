@@ -1,4 +1,5 @@
 import type { Contract, Roadmap, Track } from "./model";
+import { gapRows } from "./roadmap-structure";
 import { CELL_SEPARATOR } from "./table-row";
 
 type HistoricalScope = NonNullable<Contract["historicalScope"]>;
@@ -49,9 +50,7 @@ function readHistoricalScope(
   depth: number,
 ): HistoricalScope {
   const progress = r.tracks[track].progress;
-  const gapSection = progress.split("### 0.6 ")[1]?.split("### 0.7 ")[0] ?? "";
-  const gaps = gapSection.split("\n").flatMap((line) => {
-    if (!/^\| G\d+ \|/.test(line)) return [];
+  const gaps = (gapRows(progress) ?? []).flatMap((line) => {
     const c = line.split(CELL_SEPARATOR).map((s) => s.trim());
     const scope = /^([TX]\d{2}\.\d+) \/ D([1-4])$/.exec(c[2]);
     if (!scope || `${track}:${scope[1]}` !== objectiveId || +scope[2] !== depth)

@@ -4,26 +4,26 @@ import { STUDY_RATIO } from "./learning-model";
 import type { Objective, Roadmap, Track } from "./model";
 import { readIdentifierCounters } from "./roadmap-identifiers";
 import { supplementHeadingIn } from "./roadmap-export-names";
-import { inspectMergedDocument, PROTECTED_BLOCKS } from "./roadmap-structure";
-import { CELL_SEPARATOR } from "./table-row";
+import {
+  inspectMergedDocument,
+  PROTECTED_BLOCKS,
+  sectionBody,
+} from "./roadmap-structure";
+import { CELL_SEPARATOR, tableCells } from "./table-row";
 const validDay = (value: string) =>
   /^\d{4}-\d{2}-\d{2}$/.test(value) &&
   Number.isFinite(Date.parse(value)) &&
   new Date(value).toISOString().slice(0, 10) === value;
 function part(raw: string, heading: string) {
-  const marker = `### ${heading}\n`,
-    a = raw.indexOf(marker);
-  if (a < 0) throw Error(`Missing source section ${heading}`);
-  return raw.slice(a + marker.length).split("\n### ")[0];
+  const body = sectionBody(raw, heading);
+  if (body === undefined) throw Error(`Missing source section ${heading}`);
+  return body;
 }
 function field(raw: string, label: string) {
   const rows = raw.split("\n").filter((l) => l.startsWith(`| ${label} |`));
   if (rows.length !== 1)
     throw Error(`Missing or ambiguous saved field ${label}`);
-  const c = rows[0]
-    .split(CELL_SEPARATOR)
-    .slice(1, -1)
-    .map((c) => c.trim());
+  const c = tableCells(rows[0]);
   if (c.length !== 2) throw Error(`Malformed saved field ${label}`);
   return c[1];
 }
@@ -37,11 +37,7 @@ function checkpointCounts(objectives: Objective[]) {
     ),
   };
 }
-const cells = (line: string) =>
-  line
-    .split(CELL_SEPARATOR)
-    .slice(1, -1)
-    .map((c) => c.trim());
+const cells = tableCells;
 /** Parse an entire saved document without adopting its claims or starting study.
  * Routine changes must preserve both protected digests and the surrounding contract. */
 export async function parseRoadmapDocument(

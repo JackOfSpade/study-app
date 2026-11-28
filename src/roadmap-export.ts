@@ -51,7 +51,7 @@ import {
   formatIdentifier,
   projectIdentifierCounters,
 } from "./roadmap-identifiers";
-import { PROTECTED_BLOCKS } from "./roadmap-structure";
+import { blockText, PROTECTED_BLOCKS, sectionRange } from "./roadmap-structure";
 import {
   curriculumReadiness,
   finalRequirements,
@@ -71,11 +71,12 @@ export interface RoadmapExport {
 const tracks = ["PY", "PE"] as const;
 
 function block(raw: string, name: string) {
-  const start = `<!-- BEGIN ${name} -->`,
-    end = `<!-- END ${name} -->`;
-  if (raw.split(start).length !== 2 || raw.split(end).length !== 2)
+  if (
+    raw.split(`<!-- BEGIN ${name} -->`).length !== 2 ||
+    raw.split(`<!-- END ${name} -->`).length !== 2
+  )
     throw Error(`Missing or repeated ${name} block`);
-  return raw.split(start)[1].split(end)[0];
+  return blockText(raw, name)!;
 }
 function gapLineMap(source: string, track?: string) {
   const text = track ? block(source, `${track}_PROGRESS`) : source;
@@ -99,14 +100,9 @@ function replaceBlock(raw: string, name: string, value: string) {
   );
 }
 const section = (raw: string, heading: string) => {
-  const start = raw.indexOf(`### ${heading}\n`);
-  if (start < 0) throw Error(`Missing progress section ${heading}`);
-  const end = raw.indexOf("\n### ", start + 4);
-  return {
-    start,
-    end: end < 0 ? raw.length : end,
-    text: raw.slice(start, end < 0 ? raw.length : end),
-  };
+  const range = sectionRange(raw, heading);
+  if (!range) throw Error(`Missing progress section ${heading}`);
+  return range;
 };
 function inSection(
   raw: string,

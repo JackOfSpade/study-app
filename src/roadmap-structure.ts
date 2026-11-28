@@ -1,5 +1,5 @@
 import type { RoadmapAdoptionReceipt } from "./roadmap-adoption-types";
-import { CELL_SEPARATOR } from "./table-row";
+import { tableCells } from "./table-row";
 const names = [
   "SHARED_PROGRESS",
   "MERGE_RULES",
@@ -14,6 +14,33 @@ export const PROTECTED_BLOCKS = [
   "PY_CURRICULUM",
   "PE_CURRICULUM",
 ] as const;
+/** The text between a block's `<!-- BEGIN name -->` and `<!-- END name -->`
+ * markers, from the first BEGIN to the next END, or undefined when either is
+ * missing. The newline after the BEGIN marker stays in the text. */
+export const blockText = (raw: string, name: string) =>
+  raw.split(`<!-- BEGIN ${name} -->`)[1]?.split(`<!-- END ${name} -->`)[0];
+/** The body of the first `### heading` section: the text after its heading
+ * line, up to the next `### ` heading. Undefined when the heading is missing. */
+export function sectionBody(raw: string, heading: string) {
+  const marker = `### ${heading}\n`,
+    a = raw.indexOf(marker);
+  return a < 0 ? undefined : raw.slice(a + marker.length).split("\n### ")[0];
+}
+/** The first `### heading` section including its heading line, as offsets and
+ * text, up to the next `### ` heading. Undefined when the heading is missing. */
+export function sectionRange(raw: string, heading: string) {
+  const start = raw.indexOf(`### ${heading}\n`);
+  if (start < 0) return undefined;
+  const found = raw.indexOf("\n### ", start + 4),
+    end = found < 0 ? raw.length : found;
+  return { start, end, text: raw.slice(start, end) };
+}
+/** The raw `| G… |` rows of a track progress block's 0.6 gap section, or
+ * undefined when the section is missing. */
+export const gapRows = (progress: string) =>
+  sectionBody(progress, "0.6 Facet gaps, unknowns, and dependencies")
+    ?.split("\n")
+    .filter((line) => /^\| G\d+ \|/.test(line));
 /** True for a progress-row key in a 0.5 evidence or 0.5.1 attempt register. */
 export const isAssessmentRegisterKey = (key: string) =>
   /\/0\.5(?:\.1)? /.test(key);
@@ -89,10 +116,7 @@ export function inspectMergedDocument(raw: string) {
         table++;
         inTable = true;
       }
-      const cells = line
-        .split(CELL_SEPARATOR)
-        .slice(1, -1)
-        .map((c) => c.trim());
+      const cells = tableCells(line);
       if (!cells.length || cells.every((c) => /^:?-+:?$/.test(c))) continue;
       if (isHeader) headers = cells;
       const identity =

@@ -22,7 +22,8 @@ interface Options {
   onAdopted?: () => void;
 }
 const views = new WeakMap<HTMLElement, Options>();
-const ROADMAP_FILENAME = "interview_prep_roadmap.md";
+/** The download name of every roadmap document the app hands back. */
+export const ROADMAP_FILENAME = "interview_prep_roadmap.md";
 const reviewerLabel = (provider?: Provider) =>
   provider === "claude-cli" ? "Claude CLI" : "Study bridge";
 const changedRows = (review: NonNullable<RoadmapReconciliationJob["review"]>) =>

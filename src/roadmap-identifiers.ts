@@ -3,8 +3,9 @@ import type { Roadmap } from "./model";
 import {
   inspectMergedDocument,
   isAssessmentRegisterKey,
+  sectionBody,
 } from "./roadmap-structure";
-import { CELL_SEPARATOR } from "./table-row";
+import { CELL_SEPARATOR, tableCells } from "./table-row";
 
 export interface IdentifierCounters {
   nextSession: number;
@@ -197,7 +198,7 @@ export function readIdentifierCounters(
     );
   let declared: IdentifierCounters | undefined;
   if (hasTable) {
-    const section = shared.split(`### ${heading}\n`)[1].split("\n### ")[0];
+    const section = sectionBody(shared, heading)!;
     const c: IdentifierCounters = {
       nextSession: 1,
       nextGap: 1,
@@ -209,10 +210,7 @@ export function readIdentifierCounters(
     if (section.split("\n").some((s) => s.trim() && !s.startsWith("|")))
       throw Error("Unrecognized content in shared identifier counter metadata");
     for (const row of section.split("\n").filter((s) => s.startsWith("|"))) {
-      const cells = row
-        .split(CELL_SEPARATOR)
-        .slice(1, -1)
-        .map((s) => s.trim());
+      const cells = tableCells(row);
       if (cells[0] === "Counter" || cells.every((s) => /^-+$/.test(s)))
         continue;
       if (cells.length !== 3 || !/^\d+$/.test(cells[2]))

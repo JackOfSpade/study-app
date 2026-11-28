@@ -38,7 +38,7 @@ import { reconcileRoadmap } from "../../src/roadmap-adoption";
 import type { RoadmapReconciliation } from "../../src/roadmap-adoption-types";
 import { prepareRoadmapExport } from "../../src/roadmap-export";
 import { createRecord } from "../../tests/helpers/record";
-import { CELL_SEPARATOR } from "../../src/table-row";
+import { tableCells } from "../../src/table-row";
 import { argument, writeCaseFiles } from "./case-files";
 
 export const RECONCILE_OPERATION = "reconcile-roadmap" as const;
@@ -693,10 +693,7 @@ async function studiedProgressFile(roadmap: Roadmap, rounds: number) {
         .split("\n")
         .find((line) => line.startsWith(`| ${ev.id} |`));
       if (!row) throw Error(`exported file has no evidence row for ${ev.id}`);
-      const cells = row
-        .split(CELL_SEPARATOR)
-        .slice(1, -1)
-        .map((v) => v.trim());
+      const cells = tableCells(row);
       return {
         scopeId: scopeKey(ev.objectiveId, ev.depth),
         facet: ev.facet,

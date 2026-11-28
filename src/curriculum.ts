@@ -1,5 +1,5 @@
 import { ASSESSMENT_HELP_GUIDANCE } from "../scripts/lib/study-question-policy.mjs";
-import { adoptedSourceText } from "./imported-proof";
+import { adoptedTrackProgress } from "./imported-proof";
 import { effectiveTarget, roleFocused, studyFocus } from "./career-profile";
 import {
   assistanceSources,
@@ -239,9 +239,7 @@ export function evidencePacket(
         ? {
             canonicalHash: l.roadmapAdoptions?.at(-1)?.canonicalHash,
             adoptedAt: l.roadmapAdoptions?.at(-1)?.adoptedAt,
-            progress: adoptedSourceText(l)
-              ?.split(`<!-- BEGIN ${e.problem.contract.track}_PROGRESS -->`)[1]
-              ?.split(`<!-- END ${e.problem.contract.track}_PROGRESS -->`)[0],
+            progress: adoptedTrackProgress(l, e.problem.contract.track),
           }
         : undefined,
     sourceHash: r.sourceHash,

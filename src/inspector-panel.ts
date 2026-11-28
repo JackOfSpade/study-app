@@ -22,7 +22,7 @@ import {
 } from "./inspector-view";
 import type { StudyRecord, Roadmap } from "./model";
 import { providerForMode } from "./provider-label";
-import { renderRoadmapAdoption } from "./roadmap-adoption-ui";
+import { renderRoadmapAdoption, ROADMAP_FILENAME } from "./roadmap-adoption-ui";
 import { prepareRoadmapExport } from "./roadmap-export";
 import { presentRoadmapReview } from "./roadmap-exposure";
 import { reviewRoadmap } from "./roadmap-review";
@@ -274,11 +274,7 @@ export function createInspector(host: InspectorHost) {
           throw Error("Your progress changed during export; retry");
         host.studyRecord().study.roadmapExport = prepared;
         await host.persist();
-        download(
-          "interview_prep_roadmap.md",
-          prepared.content,
-          "text/markdown",
-        );
+        download(ROADMAP_FILENAME, prepared.content, "text/markdown");
         setText(
           "#progress-export-status",
           `Saved complete revision ${prepared.revision}. Original curriculum and historical evidence preserved. ${host.saveError() || ""}`,
@@ -293,7 +289,7 @@ export function createInspector(host: InspectorHost) {
       }
     };
     $("#source-export").onclick = () =>
-      download("interview_prep_roadmap.md", roadmap.raw, "text/markdown");
+      download(ROADMAP_FILENAME, roadmap.raw, "text/markdown");
     $("#evidence-export").onclick = () =>
       download(
         "learning-workspace-evidence.json",
