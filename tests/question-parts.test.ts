@@ -347,6 +347,10 @@ test("a part that asks for more than one thing is sent back, a single ask is not
     // From the 2026-11-28 generate quality loop: one request over a list.
     "Give the full `FormState` after each of events 1-5, and why.",
     "Classify these three values. For each, say who owns it, and why.",
+    // The 2026-11-27 loop, round 2: a request per item in other words.
+    "List, in order, the checks the server runs, giving for each the HTTP status the client receives.",
+    "Map it onto these seven types. For each type, state the change it needs.",
+    "Which problem in `f` would you fix first, and why each?",
   ];
   for (const part of compound)
     assert.match(
@@ -354,6 +358,23 @@ test("a part that asks for more than one thing is sent back, a single ask is not
       /^parts\[1\] asks for more than one thing/,
       part,
     );
+  // An open request for several findings leaves the number unstated.
+  assert.match(
+    compoundPartProblem([
+      "Which problems in `delete_photo` would you require fixed before accepting it?",
+    ]) ?? "",
+    /'Which problems' asks for an unstated number of findings/,
+  );
+  // One finding, a fact about bugs, and a lead-in clause are not.
+  assert.equal(
+    compoundPartProblem([
+      "What problem would you raise about the `<img>`, and why?",
+      "The team tracks which bugs are open. Which one blocks the release, and why?",
+      "Knowing what you know now, what would you do differently, and why?",
+      "For each request, the server logs the user. What does it log first?",
+    ]),
+    undefined,
+  );
   // A loop in a specification, or in code, is not a request per item.
   assert.equal(
     compoundPartProblem([

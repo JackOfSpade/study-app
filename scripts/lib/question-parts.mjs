@@ -90,9 +90,18 @@ export function partRequests(part) {
 }
 
 // A request repeated over a list of items ("For each, say ...", "after each
-// of events 1-5", "label each"), as opposed to code that loops ("for each user").
-const PER_ITEM =
-  /\b(?:(?:for|after) each(?:,| of\b| one\b)|(?:label|classify) each\b)/i;
+// of events 1-5", "label each", "For each type, state ...", "giving for each
+// the status", "and why each?"), as opposed to code that loops ("returning,
+// for each user, their total").
+const PER_ITEM = new RegExp(
+  `\\b(?:(?:for|after) each(?:,| of\\b| one\\b)|(?:label|classify) each\\b|(?:giving|stating|saying|naming|explaining) (?:for )?each\\b|why (?:for )?each\\b)|(?<=^|[.?!:]\\s+)for each [^,.?]{1,40}, (?:${ASK_VERBS})\\b`,
+  "i",
+);
+
+// An open request for several findings ("Which problems would you require
+// fixed?"), which leaves the learner to guess how many and which kinds.
+const PLURAL_FINDINGS =
+  /\b(?:which|what)\s+(?:\w+\s+)?(?:problems|issues|bugs|risks|defects|flaws|mistakes|weaknesses)\b/i;
 
 // A request for a count of items ("Name the two assumptions", "give three
 // risks"), as opposed to one value ("the two-pointer method", "two times").
@@ -115,14 +124,20 @@ const ASK_START = new RegExp(
   "i",
 );
 
+const LEAD_IN =
+  /^(?:knowing|given|looking back(?: on)?|thinking about)\b[^,]{0,60},\s*/i;
+
 /** The first request sentence of a part that lists several asks. */
 function listedAsks(prose) {
-  return prose
-    .split(/(?<=[.?!])\s+|\n+/)
-    .map((sentence) => sentence.replace(/^[\s>*\-\d.)]+/, "").trim())
-    .filter((sentence) => sentence.endsWith("?") || ASK_START.test(sentence))
-    .map((sentence) => LISTED.exec(sentence))
-    .find((found) => found && !EVIDENCE.test(found[1]));
+  return (
+    prose
+      .split(/(?<=[.?!])\s+|\n+/)
+      .map((sentence) => sentence.replace(/^[\s>*\-\d.)]+/, "").trim())
+      .filter((sentence) => sentence.endsWith("?") || ASK_START.test(sentence))
+      // A lead-in clause ("Knowing what you know now, what ...") is not an ask.
+      .map((sentence) => LISTED.exec(sentence.replace(LEAD_IN, "")))
+      .find((found) => found && !EVIDENCE.test(found[1]))
+  );
 }
 
 /** Why a generated part asks for more than one thing, or undefined. This is
@@ -139,17 +154,27 @@ export function compoundPartProblem(parts) {
       .replace(/`[^`\n]*`/g, "x");
     const perItem = PER_ITEM.exec(prose);
     const counted = COUNTED.exec(prose);
+    const plural = PLURAL_FINDINGS.exec(requests.join(" "));
     const listed = listedAsks(prose);
-    if (requests.length < 2 && !same && !perItem && !counted && !listed)
+    if (
+      requests.length < 2 &&
+      !same &&
+      !perItem &&
+      !counted &&
+      !plural &&
+      !listed
+    )
       continue;
     const quoted = requests.map((r) => `"${r.slice(0, 90)}"`).join(", ");
     const items = perItem
       ? ` '${perItem[0]}' asks for one answer per item: ask about the one most revealing item, or give an item that needs different reasoning its own part.`
       : counted
         ? ` '${counted[0]}' asks for several items of one kind: ask for the one that matters most, unless each item tests something the others do not, then give each its own part.`
-        : listed
-          ? ` '${listed[0].slice(0, 90)}' lists several asks in one sentence: each 'what', 'which', 'who', 'where' or 'how' is its own answer; only 'and why' for the one answer may stay with it.`
-          : "";
+        : plural
+          ? ` '${plural[0]}' asks for an unstated number of findings, so a correct answer naming fewer or others fails: ask about one subject per part (the behaviour or code path to examine), in the order the review runs, without naming the defect.`
+          : listed
+            ? ` '${listed[0].slice(0, 90)}' lists several asks in one sentence: each 'what', 'which', 'who', 'where' or 'how' is its own answer; only 'and why' for the one answer may stay with it.`
+            : "";
     return `parts[${index}] asks for more than one thing${quoted ? ` (${quoted})` : ""}.${items} Each part asks for exactly one answer about one subject, and the learner must never face two requests at once. Keep one request in that part and give each other request its own part, in the order to be worked, or cut a request the skill does not need. Do not join the requests into one sentence with 'and', and do not add 'do the same for'. Check every other part the same way, and keep prompt, rubric and scopeDefinitions consistent with the result.`;
   }
   return undefined;
