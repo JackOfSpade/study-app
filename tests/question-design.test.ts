@@ -3,7 +3,10 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 // @ts-expect-error Direct .mjs contract test.
 import { taskInstructions, validateAnswer } from "../scripts/lib/ai-contracts.mjs"; // prettier-ignore
-import { PART_SOLVE_SECONDS_MAX } from "../scripts/lib/question-parts.mjs";
+import {
+  PART_RUBRIC_LINES_MAX,
+  PART_SOLVE_SECONDS_MAX,
+} from "../scripts/lib/question-parts.mjs";
 import { checkBridge, ensureProblem, regenerateQuestion } from "../src/ai";
 import { eligible, initialStudy } from "../src/curriculum";
 import {
@@ -306,6 +309,48 @@ test("a question has no total time limit, but each part does", () => {
     assert.doesNotThrow(() =>
       validateAnswer(job, { ...answer(60), rubric: [fine] }),
     );
+  // A part graded by more rubric lines than a bite-sized part carries is sent
+  // back once (from the 2026-11-27 generate quality loop, round 3: a form's
+  // whole submit handler in one part, 7 of 11 lines).
+  const crowded = {
+    ...answer(60, [60, 60]),
+    parts: ["Write the state type.", "Write the submit handler."],
+    rubric: [
+      "Part 1 (state): holds both values.",
+      ...Array.from(
+        { length: PART_RUBRIC_LINES_MAX + 1 },
+        (_, i) => `Part 2 (outcomes): handles case ${i}; see Part 1.`,
+      ),
+    ],
+  };
+  assert.throws(
+    () => validateAnswer(job, crowded),
+    /Part 2 is graded by 5 rubric lines, over the 4 one bite-sized part may carry.*split what remains into consecutive steps/,
+  );
+  assert.doesNotThrow(() => validateAnswer(job, crowded, { final: true }));
+  // Lines spread over parts, or a later mention of an earlier part, are fine.
+  assert.doesNotThrow(() =>
+    validateAnswer(job, {
+      ...crowded,
+      rubric: [
+        "Part 1 (state): holds both values.",
+        "[outcomes] Part 2: on `201` navigates; restates Part 1's type.",
+        "Part 2 (outcomes): on `422` maps field errors.",
+        "Correctness (part 2): keeps typed values on failure.",
+        "Part 2: treats other statuses as unexpected.",
+        "Part 1 (state): holds the save status.",
+      ],
+    }),
+  );
+  // In a question of one part every line counts, labelled or not.
+  assert.throws(
+    () =>
+      validateAnswer(job, {
+        ...answer(60),
+        rubric: ["a", "b", "c", "d", "e"],
+      }),
+    /The question is graded by 5 rubric lines.*one line rather than one per entry/,
+  );
   // Both reasons go in the one correction.
   assert.throws(
     () => validateAnswer(job, { ...two, partSolveSeconds: [900] }),
@@ -315,6 +360,10 @@ test("a question has no total time limit, but each part does", () => {
   assert.doesNotMatch(instructions, /15 minutes|one sitting/);
   assert.match(instructions, /The whole question has no time limit/);
   assert.match(instructions, /at most 10 minutes each/);
+  assert.match(
+    instructions,
+    /graded by at most 4 rubric lines, each line opening with the part it grades \('Part 2: \.\.\.'\)/,
+  );
   assert.match(
     instructions,
     /a long implementation is built over several parts, one function, method or distinct piece of behaviour per part/,
@@ -339,7 +388,7 @@ test("a question has no total time limit, but each part does", () => {
     /Never ask for a count of one kind \('name two assumptions'\): ask for the one that matters most/,
     /Write 'identify each' or 'list all' only when finding every instance is the assessed skill, and then ask for the list alone: anything asked per item \('for each', 'why each'/,
     // One ask per part, in reasoning order.
-    /split or cut any that One thing per part counts as several asks, including one that lists what to cover/,
+    /split or cut any that counts as several asks, including one that lists what to cover/,
     /the consecutive steps of a problem too long for one part are not extra asks/,
     /No part asks for a conclusion whose justification is a later part's answer: a diagnosis comes before its remedy/,
     /No part repeats an earlier part's reason: a later part tests only what complete earlier answers, including any 'and why', do not already show/,
@@ -359,17 +408,17 @@ test("a question has no total time limit, but each part does", () => {
     /Ask for a superlative \('worst'\) only when one answer is defensible/,
     // Rubric check.
     /each line is one judgement checkable from the answer's words \(never whether a figure is real or sounds invented\), never one per list entry\. A verdict and its reason are one judgement; a remedy, comparison, scope check or further consequence is another/,
-    /No two lines, in any parts, credit or check the same point/,
-    /Quote the ask: for each element the line requires[^.]*quote the ask's words that request it, and cut from the line, or name in the ask, every element with none; the facet or good practice never justifies one/,
+    /No two lines, in any parts, credit or check the same point, so one mistake fails one line, even inside a spelled-out output/,
+    /Quote the ask: write each line from its ask, not your model answer \(whose extra detail goes only in 'such as' examples\); for each element the line requires[^.]*how a chosen option is built[^.]*quote the ask's words that request it, and cut from the line, or name in the ask, every element with none; the facet or good practice never justifies one/,
     /A line checks the outcome the ask names, never bans a construct the ask allows/,
-    /a value or claim it requires is true of the facts, with code traced by the language's actual rules/,
+    /a value, claim or case it requires is true of the facts and matters under them, with code traced by the language's actual rules/,
     /a distractor is a claim that must not appear/,
-    /Second route: the shortest complete correct answer to the ask as worded and one taking another route \(another ground the facts give, another item that fits an open, plural or superlative ask[^.]*must both satisfy the line/,
+    /Second route: the shortest complete correct answer to the ask as worded and one taking another route \(another ground the facts give, another item that fits an open, plural or superlative ask, another structure, construct or grouping, such as derived rather than stored state\) must both satisfy the line/,
     /the line accepts any, worded with 'such as', or the ask names the subject checked; a line never joins with 'and' two findings/,
-    /A required reason answers the ask's 'why' as literally read[^.]*never merely restates a decision the prompt fixed/,
+    /A required reason answers the ask's 'why' as literally read, for only what its clause covers \('why in that order' covers the order alone\), is any one sufficient reason the facts support unless the ask names it, and never merely restates a decision the prompt fixed/,
     /Each 'such as' example is a complete correct answer that keeps every constraint the ask states, never a partial fix/,
     /A line states each requirement once, never followed by a looser 'also acceptable' alternative; an allowance[^.]*excuses only what it names/,
-    /A line for a composed answer lists the claims that must not appear and the elements the ask names, never one preferred wording/,
+    /A composed answer is never held to one preferred wording/,
   ];
   for (const rule of shapeRules) assert.match(QUESTION_SHAPE_GUIDANCE, rule);
   assert.ok(QUESTION_SHAPE_GUIDANCE.split(/\s+/).length <= 1000);
