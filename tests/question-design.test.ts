@@ -285,6 +285,27 @@ test("a question has no total time limit, but each part does", () => {
   const two = { ...answer(60), parts: ["Which would you use? Give its cost."] };
   assert.throws(() => validateAnswer(job, two), /more than one thing/);
   assert.doesNotThrow(() => validateAnswer(job, two, { final: true }));
+  // A rubric line that requires a point and then accepts less is sent back
+  // once (from the 2026-11-27 generate quality loop, round 1).
+  const looser = {
+    ...answer(60),
+    rubric: [
+      "this-binding: The answer must make the point that `this` is set by the call. Saying only that `this` is not the uploader is also acceptable.",
+    ],
+  };
+  assert.throws(
+    () => validateAnswer(job, looser),
+    /rubric\[0\] states a requirement and then accepts less/,
+  );
+  assert.doesNotThrow(() => validateAnswer(job, looser, { final: true }));
+  for (const fine of [
+    "The fix must await the call; returning the promise is also accepted.",
+    "The reason must name both causes; naming only one is not enough.",
+    "Only a native `<button>` is accepted.",
+  ])
+    assert.doesNotThrow(() =>
+      validateAnswer(job, { ...answer(60), rubric: [fine] }),
+    );
   // Both reasons go in the one correction.
   assert.throws(
     () => validateAnswer(job, { ...two, partSolveSeconds: [900] }),
@@ -322,6 +343,7 @@ test("a question has no total time limit, but each part does", () => {
     /the consecutive steps of a problem too long for one part are not extra asks/,
     /No part asks for a conclusion whose justification is a later part's answer: a diagnosis comes before its remedy/,
     /No part repeats an earlier part's reason: a later part tests only what complete earlier answers, including any 'and why', do not already show/,
+    /never the same point restated, turned round \(why the rejected option fails\) or already guaranteed by an earlier answer/,
     /An ask to audit the learner's own answer[^.]*kept only when the objective assesses that judgement, and then as its own last part/,
     // Answer check.
     /answer each part yourself, as the learner would, from prompt and that part alone, and make sure its words ask for the answer the rubric expects/,
@@ -329,22 +351,25 @@ test("a question has no total time limit, but each part does", () => {
     /An ask claiming exactly one of something \('the bug'\) must be true/,
     /A trace states every action from the start that produces output/,
     /prompt and parts state facts, never the definition, rule or insight a rubric line checks, such as a definition of the term being tested/,
+    /a guideline, premise or qualifier on the ask that states the tested rule or criterion/,
     /An ask never rules out a candidate answer \('rather than X'\) or names the kind of answer tested/,
     /a premise a part adds keeps what the part tests in play/,
     /Ask for a superlative \('worst'\) only when one answer is defensible/,
     // Rubric check.
-    /each line is one checkable judgement, never one per list entry\. A verdict and its reason are one judgement/,
+    /each line is one checkable judgement, never one per list entry\. A verdict and its reason are one judgement; a remedy, comparison, scope check or further consequence is another/,
     /No two lines credit the same point/,
-    /Quote the ask: for each element the line requires[^.]*quote the ask's words that request it, and cut from the line, or name in the ask, every element with none/,
+    /Quote the ask: for each element the line requires[^.]*quote the ask's words that request it, and cut from the line, or name in the ask, every element with none; the facet or good practice never justifies one/,
     /A line checks the outcome the ask names, never bans a construct the ask allows/,
     /a distractor is a claim that must not appear/,
     /Second route: the shortest complete correct answer to the ask as worded and one taking another route[^.]*must both satisfy the line/,
     /the line accepts any, worded with 'such as', or the ask names the subject checked; a line never joins with 'and' two findings/,
-    /Each 'such as' example is a complete correct answer, never a partial fix or one that breaks another stated requirement/,
-    /A line never requires an item the stated requirement, or an earlier part's 'at least N of', left out/,
+    /A required reason answers the ask's 'why' as literally read[^.]*never merely restates a decision the prompt fixed/,
+    /Each 'such as' example is a complete correct answer that keeps every constraint the ask states, never a partial fix/,
+    /A line states each requirement once, never followed by a looser 'also acceptable' alternative; an allowance[^.]*excuses only what it names/,
     /A line for a composed answer lists the claims that must not appear and the elements the ask names, never one preferred wording/,
   ];
   for (const rule of shapeRules) assert.match(QUESTION_SHAPE_GUIDANCE, rule);
+  assert.ok(QUESTION_SHAPE_GUIDANCE.split(/\s+/).length <= 1000);
   assert.match(
     taskInstructions("assess", { contract }) as string,
     /a result that a later part states is never help for an answer given in an earlier part/,

@@ -16,6 +16,7 @@ import {
   partReplyProblem,
   compoundPartProblem,
   promptPreviewProblem,
+  rubricLooseningProblem,
   partsProblem,
   partSizeProblem,
   PART_SOLVE_SECONDS_MAX,
@@ -320,6 +321,7 @@ export function validateAnswer(job, answer, { final = false } = {}) {
               [
                 compoundPartProblem(answer.parts),
                 promptPreviewProblem(answer.prompt, answer.parts),
+                rubricLooseningProblem(answer.rubric),
                 partSizeProblem(answer),
               ]
                 .filter(Boolean)

@@ -174,6 +174,32 @@ export function promptPreviewProblem(prompt, parts) {
   return `prompt tells the learner what the parts will ask ('${found[0]}'). prompt holds the shared facts only and asks nothing: cut every sentence that previews, lists or defines the asks, and let each part's own words carry its ask, so the learner does not read the instructions twice or get a definition the part tests.`;
 }
 
+// A rubric line that states a requirement and then accepts less ("The answer
+// must make the point that ... Saying only that ... is also acceptable"), as
+// opposed to a second correct route ("`B` is also accepted") or a line that
+// rejects the lesser answer ("naming only one is not enough").
+const REQUIRED = /\b(?:must|required?|requires|needs? to)\b/i;
+const LOOSER =
+  /\b(?:only|just|merely)\b[^.;]{0,160}?\b(?:is|are)\s+(?:also\s+|still\s+)?(?:acceptable|accepted|enough|sufficient|fine|(?:fully\s+)?credited)\b/i;
+
+/** Why a generated rubric line contradicts itself by following a
+ * requirement with a looser alternative, or undefined. Like
+ * compoundPartProblem, advice for one correction, never grounds to refuse a
+ * question outright. */
+export function rubricLooseningProblem(rubric) {
+  if (!Array.isArray(rubric)) return undefined;
+  for (const [index, line] of rubric.entries()) {
+    if (typeof line !== "string") continue;
+    const prose = line
+      .replace(/```[\s\S]*?```/g, " ")
+      .replace(/`[^`\n]*`/g, "x");
+    const looser = LOOSER.exec(prose);
+    if (!looser || !REQUIRED.test(prose.slice(0, looser.index))) continue;
+    return `rubric[${index}] states a requirement and then accepts less ('${looser[0].slice(0, 90)}'), so a grader cannot tell which applies. Keep one requirement per line: either the answer must make the point, or the lesser answer is enough and the line asks only for that. Keep the part's ask consistent with the result.`;
+  }
+  return undefined;
+}
+
 /** The whole question as one text: what every reader other than the staged
  * display uses (assessment, history, reports). */
 export function composePrompt(shared, parts) {

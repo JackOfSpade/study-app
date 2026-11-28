@@ -9,6 +9,7 @@ export function promptPreviewProblem(
   prompt: unknown,
   parts: unknown,
 ): string | undefined;
+export function rubricLooseningProblem(rubric: unknown): string | undefined;
 export function composePrompt(shared: string, parts: string[]): string;
 export function stagedParts(problem: unknown): string[] | undefined;
 export function closesPart(
