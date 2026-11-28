@@ -173,7 +173,8 @@ test("container workspace React API: immutable checks and preview survive later 
     });
     expect(saved.job).toEqual(result.job);
     expect(saved.draft).toBe(draft);
-    await expect(page.locator("#terminal")).toBeHidden();
+    // The unfinished question reopens after a reload, as any open question does.
+    await expect(page.locator("#terminal")).toBeVisible();
     // A forged HTTP preview in a new response is rejected by the real runtime
     // validator before it can enter the saved job or cause an image request.
     let leaked = false;
