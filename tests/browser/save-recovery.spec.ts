@@ -392,3 +392,48 @@ test("an import that reopens the same question does not announce its saved repli
     "Tutor replied.",
   );
 });
+
+test("a reopened long conversation opens at its latest message", async ({
+  page,
+}) => {
+  await mockClaudeStudy(page);
+  const id = await openStudyQuestion(page);
+  await flushStudySave(page);
+  const backup = await page.evaluate(async (id) => {
+    const root = "/src/";
+    const { decode, encode } = await import(
+      /* @vite-ignore */ root + "persistence.ts"
+    );
+    const copy = decode(encode((window as any).__studyApp.record));
+    const e = copy.encounters[id];
+    let seq = Math.max(0, ...e.tutor.map((m: { seq: number }) => m.seq));
+    for (let i = 0; i < 30; i++)
+      e.tutor.push({
+        id: `long-reply-${i}`,
+        author: "Terminal AI",
+        kind: "tutor",
+        text: `Long saved tutor reply ${i}. ${"Detail. ".repeat(40)}`,
+        seq: ++seq,
+        worldTime: e.tutor.at(-1)?.worldTime ?? 0,
+      });
+    copy.seq += 1;
+    return encode(copy);
+  }, id);
+  await openAgentMenu(page);
+  await page.locator("#settings-toggle").click();
+  await page.locator("#import").setInputFiles({
+    name: "synthetic-long-conversation.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(backup),
+  });
+  await expect(page.locator("#messages")).toContainText(
+    "Long saved tutor reply 29",
+  );
+  await expect
+    .poll(() =>
+      page
+        .locator("#messages")
+        .evaluate((box) => box.scrollHeight - box.scrollTop - box.clientHeight),
+    )
+    .toBeLessThan(40);
+});

@@ -208,6 +208,9 @@ export function createTerminalPanels(host: TerminalPanelHost) {
   // reply once instead of re-reading the whole conversation.
   let shownEncounter: string | undefined;
   let shownMessages = 0;
+  // The opening render can land while the question view is still hidden,
+  // where setting scrollTop does nothing; the scroll is kept until it shows.
+  let scrollPending = false;
 
   /** The conversation, then a reply still arriving. */
   function messages(e: Encounter) {
@@ -247,7 +250,11 @@ export function createTerminalPanels(host: TerminalPanelHost) {
       added.some((m) => m.author === "human") ||
       box.scrollHeight - box.scrollTop - box.clientHeight < 40;
     if (added.some((m) => m.kind === "tutor")) announce("Tutor replied.");
-    if (setHtml(box, html) && stick) box.scrollTop = box.scrollHeight;
+    if (setHtml(box, html) && stick) scrollPending = true;
+    if (scrollPending && box.clientHeight > 0) {
+      box.scrollTop = box.scrollHeight;
+      scrollPending = false;
+    }
   }
 
   /** Says a short line to assistive technology once. The conversation itself
@@ -268,6 +275,7 @@ export function createTerminalPanels(host: TerminalPanelHost) {
   function reset() {
     shownEncounter = undefined;
     shownMessages = 0;
+    scrollPending = false;
   }
 
   return { requestStatus, messages, reset };
