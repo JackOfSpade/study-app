@@ -94,6 +94,11 @@ export function partRequests(part) {
 const PER_ITEM =
   /\b(?:(?:for|after) each(?:,| of\b| one\b)|(?:label|classify) each\b)/i;
 
+// A request for a count of items ("Name the two assumptions", "give three
+// risks"), as opposed to one value ("the two-pointer method", "two times").
+const COUNTED =
+  /\b(?:give|name|list|identify|state|suggest|propose)\s+(?:the\s+|any\s+|at least\s+|up to\s+)?(?:two|three|four|five|[2-5])\s+(?!(?:times|minutes|seconds|ms|hours|days)\b)[a-z][\w-]*/i;
+
 /** Why a generated part asks for more than one thing, or undefined. This is
  * a reading of prose, so the caller treats it as advice for one correction,
  * never as grounds to refuse a question outright. */
@@ -103,14 +108,18 @@ export function compoundPartProblem(parts) {
     if (typeof part !== "string") continue;
     const requests = partRequests(part);
     const same = /\bdo the same\b/i.test(part);
-    const perItem = PER_ITEM.exec(
-      part.replace(/```[\s\S]*?```/g, " ").replace(/`[^`\n]*`/g, "x"),
-    );
-    if (requests.length < 2 && !same && !perItem) continue;
+    const prose = part
+      .replace(/```[\s\S]*?```/g, " ")
+      .replace(/`[^`\n]*`/g, "x");
+    const perItem = PER_ITEM.exec(prose);
+    const counted = COUNTED.exec(prose);
+    if (requests.length < 2 && !same && !perItem && !counted) continue;
     const quoted = requests.map((r) => `"${r.slice(0, 90)}"`).join(", ");
     const items = perItem
       ? ` '${perItem[0]}' asks for one answer per item: ask about the one most revealing item, or give an item that needs different reasoning its own part.`
-      : "";
+      : counted
+        ? ` '${counted[0]}' asks for several items of one kind: ask for the one that matters most, unless each item tests something the others do not, then give each its own part.`
+        : "";
     return `parts[${index}] asks for more than one thing${quoted ? ` (${quoted})` : ""}.${items} Each part asks for exactly one answer about one subject, and the learner must never face two requests at once. Keep one request in that part and give each other request its own part, in the order to be worked, or cut a request the skill does not need. Do not join the requests into one sentence with 'and', and do not add 'do the same for'. Check every other part the same way, and keep prompt, rubric and scopeDefinitions consistent with the result.`;
   }
   return undefined;

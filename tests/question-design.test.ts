@@ -357,6 +357,34 @@ test("a question has no total time limit, but each part does", () => {
     /Ask for a superlative \('worst', 'most important'\) only when the rubric checks one defensible answer/,
   );
   assert.match(instructions, /material no part asks about is never kept/);
+  // The 2026-11-28 generate quality loop, round 2 (5 of 12 passed): open asks
+  // whose rubric accepted one of several correct answers, qualities ('smallest',
+  // 'for any input') the ask never named, the same point credited in two parts,
+  // label definitions that turned a sort into a lookup, and 'name two'.
+  assert.match(
+    instructions,
+    /When the facts support more than one correct answer to an open ask \('what cost does this add', 'why is a passing test not enough'\), the line accepts any of them, worded with 'such as', or the ask names the subject the line checks/,
+  );
+  assert.match(
+    instructions,
+    /such as specific figures, a named caveat, a format, a length, 'smallest', 'for any input' or grounding in a named fact, the ask names it/,
+  );
+  assert.match(
+    instructions,
+    /a line for an ask to list what a requirement calls for never requires an item the requirement does not state/,
+  );
+  assert.match(
+    instructions,
+    /No two lines credit the same point: what an earlier part's line requires is never required again by a later one/,
+  );
+  assert.match(
+    instructions,
+    /a prompt that defines each label the learner sorts cases into, in the words of the reasons the rubric expects, turns the sort into a lookup/,
+  );
+  assert.match(
+    instructions,
+    /Never ask for a count of items of one kind \('name two assumptions', 'give three risks'\) when one shows the same skill/,
+  );
   assert.match(
     taskInstructions("assess", { contract }) as string,
     /a result that a later part states is never help for an answer given in an earlier part/,

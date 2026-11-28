@@ -365,6 +365,28 @@ test("a part that asks for more than one thing is sent back, a single ask is not
     compoundPartProblem(["Label each line as safe or unsafe."]) ?? "",
     /'Label each' asks for one answer per item/,
   );
+  // From the 2026-11-28 generate quality loop, round 2: a count of items of
+  // one kind in one part.
+  assert.match(
+    compoundPartProblem([
+      "Name the two assumptions in your framing that would most change what you build.",
+    ]) ?? "",
+    /'Name the two assumptions' asks for several items of one kind/,
+  );
+  assert.match(
+    compoundPartProblem(["Give three risks of this rollout."]) ?? "",
+    /'Give three risks' asks for several items of one kind/,
+  );
+  // One value that happens to hold a number is not a count of items.
+  assert.equal(
+    compoundPartProblem([
+      "Name the two-pointer technique this loop uses.",
+      "State how long the job takes if it runs two times a day.",
+      "Compare the two approaches, and why?",
+      "What does `give(2, x)` return?",
+    ]),
+    undefined,
+  );
   // Code is material, never a request.
   assert.equal(
     partRequests("```py\n# Give x? List y.\n```\nWhat does it print?").length,
