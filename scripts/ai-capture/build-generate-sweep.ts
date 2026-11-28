@@ -28,13 +28,9 @@ export const SWEEP_TOPICS = [
   ...new Set(CORE_IDS.filter((id) => id.startsWith("PE:")).map(topicOf)),
 ];
 
-/** The generate payload the app sends for a fresh live, career-focused
- * record whose PE queue is at `topic` and `depth`. */
-export async function sweepPayload(
-  r: Roadmap,
-  topic: string,
-  depth: number,
-): Promise<Record<string, unknown>> {
+/** A fresh live, career-focused record whose PE queue is at `topic` and
+ * `depth`, with the question it will issue. */
+export function sweepRecord(r: Roadmap, topic: string, depth: number) {
   const g = recordFor(r);
   activateCareerFocus(r, g.study);
   const learner = g.study.learner!;
@@ -42,7 +38,16 @@ export async function sweepPayload(
   learner.studyTurnPosition = 1;
   learner.tracks.PE.tier = depth;
   learner.tracks.PE.queue = [topic];
-  const e = encounterFor(g, 0);
+  return { g, e: encounterFor(g, 0) };
+}
+
+/** The generate payload the app sends for `sweepRecord(r, topic, depth)`. */
+export async function sweepPayload(
+  r: Roadmap,
+  topic: string,
+  depth: number,
+): Promise<Record<string, unknown>> {
+  const { g, e } = sweepRecord(r, topic, depth);
   let captured: Record<string, unknown> | undefined;
   await withBridge(
     (operation, payload) => {

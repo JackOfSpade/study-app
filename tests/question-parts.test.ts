@@ -473,3 +473,32 @@ test("a shared prompt that previews what the parts ask is sent back, scenario fa
     undefined,
   );
 });
+
+test("generate refuses a facet id the app would refuse, inside the same call", () => {
+  const contract = { track: "PE", depth: 1 };
+  const reply = (id: string) => ({
+    title: "t",
+    prompt: "p",
+    starter: "",
+    rubric: ["r"],
+    parts: ["One?"],
+    contract,
+    scopeDefinitions: [
+      { id: "PE:T01.1/D1", facets: [{ id, description: "d" }] },
+    ],
+  });
+  const job = { operation: "generate", payload: { contract } };
+  // Real Opus replies on 2026-11-28 used the scope id as a prefix.
+  for (const bad of ["PE:T05.1/D1:responsibility-boundary", "a/b", ""])
+    assert.throws(
+      () => validateAnswer(job, reply(bad), { final: true }),
+      /Facet id .* is not allowed/,
+    );
+  assert.doesNotThrow(() =>
+    validateAnswer(job, reply("responsibility-boundary"), { final: true }),
+  );
+  assert.match(
+    taskInstructions("generate", { contract }) as string,
+    /a facet id is a short slug of letters, digits, hyphens, underscores or dots/,
+  );
+});

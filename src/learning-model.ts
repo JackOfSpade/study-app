@@ -1,3 +1,4 @@
+import { FACET_ID } from "../scripts/lib/facet-id.mjs";
 import type { Provider, Contract, Track } from "./model";
 export type CellState = "U" | "G" | "P" | "R" | "—";
 export interface ScopeDefinition {
@@ -294,7 +295,7 @@ export function scopeFacetsValid(
       (f) =>
         !!f &&
         typeof f.id === "string" &&
-        /^[-\w.]{1,100}$/.test(f.id) &&
+        FACET_ID.test(f.id) &&
         typeof f.description === "string" &&
         !!f.description.trim() &&
         (!importedText ||
