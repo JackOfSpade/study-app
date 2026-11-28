@@ -12,7 +12,11 @@ import {
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { createClaudeGateway, taskProfile } from "./claude-gateway.mjs";
+import {
+  createClaudeGateway,
+  failureOutcome,
+  taskProfile,
+} from "./claude-gateway.mjs";
 import { isNumber, mean, percentile, sumKnown } from "./lib/measure.mjs";
 import { privateDirectory } from "./lib/private-fs.mjs";
 
@@ -211,15 +215,10 @@ export function readLadderRows(out) {
     });
 }
 
-const outcomeOf = (error) => {
-  if (error?.code === "CLAUDE_INVALID_ANSWER") return "invalid";
-  return (
-    String(error?.code ?? "")
-      .replace(/^CLAUDE_/, "")
-      .toLowerCase()
-      .replace(/_/g, "-") || "error"
-  );
-};
+/** The gateway's own failure label (a killed timer reads as timeout), but a
+ * rejected answer is "invalid" as in the replay samples. */
+const outcomeOf = (error) =>
+  error?.code === "CLAUDE_INVALID_ANSWER" ? "invalid" : failureOutcome(error);
 
 /** Runs every case under every setting, one fresh gateway per arm, appending
  * each row at once so an interrupted run resumes where it stopped. */

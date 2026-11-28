@@ -14,7 +14,7 @@ import { prepareRoadmapExport } from "../src/roadmap-export";
 import { createRecord } from "./helpers/record";
 const r: Roadmap = JSON.parse(readFileSync("public/curriculum.json", "utf8"));
 async function fixture() {
-  const g = createRecord(7, r),
+  const g = createRecord(r),
     e = g.encounters["question-0"];
   edit(g, e, "assert 2 + 2 == 4", 0);
   const receipt = {
@@ -53,7 +53,7 @@ async function fixture() {
   return { g, e, key: environmentExecutions(g)[0].key };
 }
 test("report-only ENV packets preserve reported provenance and do not certify environment or academic progress", async () => {
-  const g = createRecord(0, r),
+  const g = createRecord(r),
     learner = JSON.stringify(g.study.learner),
     visits = JSON.stringify(g.study.visits),
     ready = curriculumReadiness(r, g.study.learner!, "PE");
@@ -123,7 +123,7 @@ test("identical capture coalesces concurrently and after reload, even when unrel
   assert.equal(restored.study.environmentObservations?.length, 1);
 });
 test("caller-supplied output is retained byte-for-byte as unreviewed material with its digest", async () => {
-  const g = createRecord(0, r),
+  const g = createRecord(r),
     text = "<script>not executed</script>\nActual output supplied by learner\n";
   const packet = await recordEnvironmentObservation(g, r, {
     envId: "PE:ENV03",
@@ -167,7 +167,7 @@ test("archives and a fresh run retain self-contained pending packets without bor
       executionKey: key,
     });
   g.study.archives.push(e);
-  const next = createRecord(42, r, g.study);
+  const next = createRecord(r, g.study);
   assert.equal(next.study.environmentObservations?.[0].id, packet.id);
   assert.equal(environmentExecutions(next)[0].key, key);
   assert.notEqual(next.encounters[e.id].runId, e.runId);
@@ -192,12 +192,12 @@ test("invalid scope, mismatched source, empty reports and oversized supplied out
       suppliedOutput: { name: "log", text: "a".repeat(262145) },
     },
   ]) {
-    const g = createRecord(0, r),
+    const g = createRecord(r),
       before = JSON.stringify(g.study);
     await assert.rejects(recordEnvironmentObservation(g, r, input));
     assert.equal(JSON.stringify(g.study), before);
   }
-  const g = createRecord(0, r);
+  const g = createRecord(r);
   g.study.learner!.sourceHash = "wrong";
   await assert.rejects(
     recordEnvironmentObservation(g, r, {

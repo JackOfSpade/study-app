@@ -53,7 +53,7 @@ function deepFreeze<T>(value: T): T {
 }
 
 test("a whole lesson flow leaves a frozen study record and roadmap untouched", async () => {
-  const g = createRecord(1, r, initialStudy(r, "live"));
+  const g = createRecord(r, initialStudy(r, "live"));
   const contract = eligible(r, g.study);
   const e = g.encounters["question-0"];
   e.problem = devProblem(Object.assign({ rng: 3 }, g), r, contract);

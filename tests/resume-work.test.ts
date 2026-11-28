@@ -27,7 +27,7 @@ const RESTARTED_TUTOR =
   "Application restarted; retry the exact saved private question.";
 
 function liveRecord() {
-  const g = createRecord(1, r);
+  const g = createRecord(r);
   g.study = initialStudy(r, "live");
   return g;
 }
@@ -136,7 +136,7 @@ function tutorEncounter(
   over: Partial<TutorRequest> = {},
   tail: Encounter["tutor"] = [],
 ) {
-  const g = createRecord(2, r);
+  const g = createRecord(r);
   const e = g.encounters["question-0"];
   e.tutor = [
     {
@@ -265,7 +265,7 @@ test("a record cut off mid-tutor-request is resumed after reload with the same p
   }) as typeof fetch;
   try {
     await checkBridge();
-    const g = createRecord(717, r);
+    const g = createRecord(r);
     preparePracticeRooms(g, r);
     const e = g.encounters["question-0"];
     e.mode = "solo";
@@ -317,7 +317,7 @@ test("a resumed request saved before help policies ignores malformed help and st
   }) as typeof fetch;
   try {
     await checkBridge();
-    const g = createRecord(718, r);
+    const g = createRecord(r);
     preparePracticeRooms(g, r);
     const e = g.encounters["question-0"];
     e.mode = "solo";

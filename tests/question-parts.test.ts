@@ -169,7 +169,7 @@ test("real bridge: a generated question is staged, worked part by part, and fini
   try {
     globalThis.fetch = status("development");
     await checkBridge();
-    const g = createRecord(1, roadmap);
+    const g = createRecord(roadmap);
     preparePracticeRooms(g, roadmap);
     const e = g.encounters["question-0"];
     e.owner = "human";
@@ -280,7 +280,7 @@ test("a generated reply's parts become the stored staged question", async () => 
       });
     }) as typeof fetch;
     await checkBridge();
-    const g = createRecord(1, roadmap, initialStudy(roadmap, "live"));
+    const g = createRecord(roadmap, initialStudy(roadmap, "live"));
     const e = g.encounters["question-0"];
     e.studyOnly = true;
     await ensureProblem(g, e, roadmap);

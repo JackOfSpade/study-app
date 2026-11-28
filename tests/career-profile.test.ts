@@ -78,7 +78,7 @@ test("future development and live questions use only core objectives", () => {
     );
   }
   const s = initialStudy(r, "live");
-  const g = createRecord(12, r, s);
+  const g = createRecord(r, s);
   const e = Object.values(g.encounters)[0];
   const contract = eligibleLearning(r, s.learner!, at);
   e.problem = {

@@ -16,7 +16,7 @@ import type { Roadmap } from "../src/model";
 const roadmap: Roadmap = JSON.parse(
   readFileSync("public/curriculum.json", "utf8"),
 );
-const record = () => createRecord(11, roadmap);
+const record = () => createRecord(roadmap);
 const memory = () => ({ read: async () => null, write: async () => {} });
 function storedLogs() {
   let stored: string | null = null;

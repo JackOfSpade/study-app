@@ -22,7 +22,7 @@ const at = "2026-10-15T16:00:00.000Z";
 // written. Exercise the production export's live-mode guard and transaction path.
 function fixture() {
   const l = initialLearner(r);
-  const g = createRecord(7, r);
+  const g = createRecord(r);
   let n = 0;
   function issue() {
     const e = Object.values(g.encounters)[n++],
@@ -388,7 +388,7 @@ test("roadmap export: preview-only scope generation cannot create a revision; pe
   assess(e);
   const first = await prepareRoadmapExport(r, l, undefined, at);
   const c = eligibleLearning(r, l, at),
-    preview = createRecord(99, r).encounters["question-0"];
+    preview = createRecord(r).encounters["question-0"];
   preview.problem = {
     title: "preview",
     prompt: "preview",

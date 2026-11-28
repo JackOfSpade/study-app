@@ -27,7 +27,7 @@ const r: Roadmap = JSON.parse(readFileSync("public/curriculum.json", "utf8"));
 for (const outcome of ["independent", "assisted", "contradicted"] as const)
   for (const seekBaselineGap of [false, true])
     test(`a reviewed correction of an actual ${outcome} served attempt preserves history, corrected projection and baseline gap=${seekBaselineGap}`, async () => {
-      const g = createRecord(7, r);
+      const g = createRecord(r);
       g.study.profile = "live";
       const l = g.study.learner!;
       let e = g.encounters["question-0"],

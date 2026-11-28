@@ -36,7 +36,7 @@ async function fixture(
   };
   try {
     await checkBridge();
-    const g = createRecord(717, r);
+    const g = createRecord(r);
     preparePracticeRooms(g, r);
     const e = g.encounters["question-0"];
     e.mode = "solo";
@@ -342,7 +342,7 @@ test("a declared gap lets the tutor concede the question, records the gap with t
       g.study.knowledgeEstablished.map((k: any) => k.facet.id),
       [facets[0].id],
     );
-    const nextRun = createRecord(5, r, recover(decode(encode(g))).study);
+    const nextRun = createRecord(r, recover(decode(encode(g))).study);
     assert.equal(nextRun.study.knowledgeGaps!.length, facets.length - 1);
   }));
 

@@ -174,7 +174,7 @@ test("an unreadable checkpoint stays protected through lifecycle saves until a v
     const { encode } = await import(/* @vite-ignore */ root + "persistence.ts");
     const helpers = "/tests/helpers/record.ts";
     const { createRecord } = await import(/* @vite-ignore */ helpers);
-    const g = createRecord(123, (window as any).__studyApp.roadmap);
+    const g = createRecord((window as any).__studyApp.roadmap);
     g.encounters["question-0"].chatDraft =
       "Synthetic unfinished answer restored from backup";
     return encode(g);
@@ -294,7 +294,7 @@ test("a save under the earlier storage names loads and then moves to the new nam
     const { encode } = await import(/* @vite-ignore */ root + "persistence.ts");
     const helpers = "/tests/helpers/record.ts";
     const { createRecord } = await import(/* @vite-ignore */ helpers);
-    const g = createRecord(124, (window as any).__studyApp.roadmap);
+    const g = createRecord((window as any).__studyApp.roadmap);
     g.encounters["question-0"].chatDraft =
       "Synthetic draft saved by the earlier build";
     // Newer than anything this tab wrote, as from a tab on the earlier build.

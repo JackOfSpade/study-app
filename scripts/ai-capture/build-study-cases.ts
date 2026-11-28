@@ -377,7 +377,7 @@ async function withBridge(handler: Handler, run: () => Promise<void>) {
 /** A fresh live study record with twelve unasked questions. Every one is the
  * same, so cases differ only by what the builders seed into them. */
 function recordFor(r: Roadmap) {
-  return createRecord(0, r, initialStudy(r, "live"));
+  return createRecord(r, initialStudy(r, "live"));
 }
 
 function encounterFor(g: StudyRecord, index: number) {

@@ -17,7 +17,7 @@ const block = (text: string, name: string) =>
 test("source export recomputes original gates instead of projecting role-profile clearance as full mastery", async () => {
   const s = initialStudy(r, "live"),
     l = s.learner!;
-  const g = createRecord(13, r, s),
+  const g = createRecord(r, s),
     e = Object.values(g.encounters)[0];
   const contract = eligibleLearning(r, l, at);
   e.problem = {
@@ -80,7 +80,7 @@ test("reviewed adoption under a role focus keeps exact source bytes and ancestry
   const { reconcileRoadmap, adoptReconciledRoadmap } =
     await import("../src/roadmap-adoption");
   const s = initialStudy(r, "live"),
-    g = createRecord(91, r, s);
+    g = createRecord(r, s);
   activateCareerFocus(r, s);
   const originalCells = structuredClone(s.learner!.cells),
     originalSessions = structuredClone(s.learner!.sessions);

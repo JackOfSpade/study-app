@@ -12,7 +12,7 @@ import { sha256 } from "../src/digest";
 import { createRecord } from "./helpers/record";
 const r: Roadmap = JSON.parse(readFileSync("public/curriculum.json", "utf8"));
 function fixture() {
-  const g = createRecord(0, r);
+  const g = createRecord(r);
   g.study = initialStudy(r, "live");
   // Synthetic gate history, confined to a test-mode ledger.
   const l = initialLearner(r, "test");

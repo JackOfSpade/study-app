@@ -37,7 +37,7 @@ function question(g: StudyRecord, e: Encounter) {
   registerScopes(r, g.study.learner!, e);
 }
 function fixture() {
-  const g = createRecord(33, r, initialStudy(r, "live")),
+  const g = createRecord(r, initialStudy(r, "live")),
     e = g.encounters["question-0"];
   g.study.learner!.reviews = {};
   question(g, e);

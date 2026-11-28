@@ -27,7 +27,7 @@ function next(raw: string) {
 }
 function fixture() {
   const l = initialLearner(r),
-    g = createRecord(7, r),
+    g = createRecord(r),
     e = g.encounters["question-0"],
     contract = eligibleLearning(r, l, at);
   e.problem = {

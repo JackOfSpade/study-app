@@ -15,7 +15,7 @@ const roadmap: Roadmap = JSON.parse(
 );
 function fixture() {
   const r = structuredClone(roadmap),
-    g = createRecord(725, r);
+    g = createRecord(r);
   g.study = initialStudy(r, "live");
   const e = g.encounters["question-0"],
     contract = eligible(r, g.study);
@@ -273,7 +273,7 @@ test("late archived assessment still applies to the retained shared study state"
   try {
     const pending = assess(g, e, r);
     g.study.archives.push(e);
-    const next = createRecord(726, r, g.study);
+    const next = createRecord(r, g.study);
     finish(unresolved());
     await pending;
     assert.equal(next.study, g.study);

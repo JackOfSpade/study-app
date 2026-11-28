@@ -483,7 +483,7 @@ async function capturePayload(
   roadmap: Roadmap,
   candidate: string,
 ): Promise<RoadmapPayload> {
-  const g = createRecord(7, roadmap);
+  const g = createRecord(roadmap);
   g.study.profile = "live";
   let payload: unknown;
   await reconcileRoadmap(g, roadmap, candidate, async (captured) => {
@@ -603,7 +603,7 @@ export async function writeRoadmapCases(
 
 /** A fresh live record, mirroring the study fixture the reference test proves. */
 function liveStudy(roadmap: Roadmap) {
-  const g = createRecord(7, roadmap);
+  const g = createRecord(roadmap);
   g.study.profile = "live";
   if (!g.study.learner) throw Error("a live study profile has no learner");
   return { g, l: g.study.learner };

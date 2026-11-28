@@ -7,7 +7,7 @@ import { createRecord } from "./helpers/record";
 
 const r: Roadmap = JSON.parse(readFileSync("public/curriculum.json", "utf8"));
 test("recovery interrupts every archived request while retaining captured work and request identity", () => {
-  const g = createRecord(727, r),
+  const g = createRecord(r),
     archive = structuredClone(g.encounters["question-0"]);
   archive.runId = "synthetic-previous-run";
   archive.workspace = "Synthetic archived human draft";

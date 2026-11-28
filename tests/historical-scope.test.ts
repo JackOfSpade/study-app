@@ -83,7 +83,7 @@ test("generated questions cannot replace scheduler review/version or strip histo
     await checkBridge();
     for (const mode of ["strip", "review", "version"] as const) {
       alteration = mode;
-      const g = createRecord(1, r);
+      const g = createRecord(r);
       g.study.profile = "live";
       g.study.learner = initialLearner(r, "test");
       const e = g.encounters["question-0"];

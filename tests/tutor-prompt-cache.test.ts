@@ -33,7 +33,7 @@ async function conversation(replies: Record<string, unknown>[]) {
   };
   try {
     await checkBridge();
-    const g: any = createRecord(717, roadmap);
+    const g: any = createRecord(roadmap);
     preparePracticeRooms(g, roadmap);
     const e: any = g.encounters["question-0"];
     await ensureProblem(g, e, roadmap);

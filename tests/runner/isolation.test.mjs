@@ -168,20 +168,20 @@ test("a missing configured image stays unavailable and never executes on the hos
 
 test("framed CLI input preserves Unicode and presents EOF to Python, TypeScript and JavaScript programs", async () => {
   const cases = [
-    ["python", 'import sys\nprint("🧟 café")\nprint(len(sys.stdin.read()))'],
+    ["python", 'import sys\nprint("𝄞 café")\nprint(len(sys.stdin.read()))'],
     [
       "typescript",
-      'import {readFileSync} from "node:fs"; const text:string="🧟 café"; console.log(text); console.log(readFileSync(0,"utf8").length);',
+      'import {readFileSync} from "node:fs"; const text:string="𝄞 café"; console.log(text); console.log(readFileSync(0,"utf8").length);',
     ],
     [
       "javascript",
-      'import {readFileSync} from "node:fs"; console.log("🧟 café"); console.log(readFileSync(0,"utf8").length);',
+      'import {readFileSync} from "node:fs"; console.log("𝄞 café"); console.log(readFileSync(0,"utf8").length);',
     ],
   ];
   for (const [language, code] of cases) {
     const receipt = await executeCode({ language, code });
     assert.equal(receipt.executed, true, JSON.stringify(receipt));
     assert.equal(receipt.exitCode, 0, receipt.stderr);
-    assert.equal(receipt.stdout, "🧟 café\n0\n");
+    assert.equal(receipt.stdout, "𝄞 café\n0\n");
   }
 });

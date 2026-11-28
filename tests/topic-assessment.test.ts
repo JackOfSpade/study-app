@@ -189,7 +189,7 @@ async function terminalFixture(
   };
   try {
     await checkBridge();
-    const g = createRecord(717, liveRoadmap);
+    const g = createRecord(liveRoadmap);
     preparePracticeRooms(g, liveRoadmap);
     const e = g.encounters["question-0"];
     await ensureProblem(g, e, liveRoadmap);

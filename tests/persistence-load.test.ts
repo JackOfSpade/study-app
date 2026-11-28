@@ -101,7 +101,7 @@ test("unreadable storage is not mistaken for an empty save", async () => {
 });
 
 test("an unreadable store cannot silently replace newer work with the other valid copy", async () => {
-  const g = createRecord(729, roadmap);
+  const g = createRecord(roadmap);
   copies.local = encode(g);
   copies.durableError = true;
   await assert.rejects(load(), /could not be read/);
@@ -143,7 +143,7 @@ test("recovery export preserves damaged bytes and reports unreadable copies", as
 });
 
 test("a copy refused while the other loads is reported with its exact bytes", async () => {
-  const g = createRecord(731, roadmap);
+  const g = createRecord(roadmap);
   const good = JSON.stringify({ format: 2, serial: 5, data: encode(g) });
   copies.durable = copies.local = good;
   assert.equal((await load())!.id, g.id);
@@ -173,7 +173,7 @@ test("a copy refused while the other loads is reported with its exact bytes", as
 test("JSON that is not an envelope fails the integrity check, not a property read", async () => {
   for (const text of ["null", "0", '"save"', "[]", "{}"])
     assert.throws(() => decode(text), /^Error: Save integrity check failed$/);
-  const g = createRecord(732, roadmap);
+  const g = createRecord(roadmap);
   // The envelope is a protected format: these exact bytes.
   const payload = JSON.stringify(g);
   assert.equal(
@@ -189,7 +189,7 @@ test("JSON that is not an envelope fails the integrity check, not a property rea
 });
 
 test("a draft larger than one megabyte has a full synchronous checkpoint before its durable write settles", async () => {
-  const g = createRecord(730, roadmap),
+  const g = createRecord(roadmap),
     e = g.encounters["question-0"];
   e.workspace = "Synthetic unfinished answer ".repeat(45_000);
   const pending = save(g);

@@ -18,7 +18,11 @@ import {
   readLadderRows,
   rowKey,
 } from "./ai-ladder.mjs";
-import { claudeChildEnv, resolveClaudeBinary } from "./claude-gateway.mjs";
+import {
+  LOCKDOWN_ARGS,
+  claudeChildEnv,
+  resolveClaudeBinary,
+} from "./claude-gateway.mjs";
 import { taskInstructions } from "./lib/ai-contracts.mjs";
 import { isNumber, mean } from "./lib/measure.mjs";
 
@@ -340,12 +344,7 @@ export function claudeJudgeArgs({ model, effort, system }) {
     effort,
     "--system-prompt",
     system,
-    "--tools",
-    "",
-    "--setting-sources",
-    "",
-    "--strict-mcp-config",
-    "--disable-slash-commands",
+    ...LOCKDOWN_ARGS,
     "--input-format",
     "text",
     "--output-format",

@@ -9,7 +9,7 @@ import { waitForStudyApp } from "./study-harness";
 test("original checkpoint correction exposes complete historical review before adoption and survives reload", async ({
   page,
 }) => {
-  const synthetic = createRecord(7, r);
+  const synthetic = createRecord(r);
   synthetic.study.profile = "live";
   const fixture = await baselineFixture(synthetic);
   await page.route("**/api/status", (route) =>

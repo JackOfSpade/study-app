@@ -15,6 +15,7 @@ import { delimiter, dirname, join } from "node:path";
 import { taskInstructions, validateAnswer } from "./lib/ai-contracts.mjs";
 import { fillOmittedHelp, helpStreamGate } from "./lib/help-gate.mjs";
 import { isRecord } from "./lib/is-record.mjs";
+import { sumKnown } from "./lib/measure.mjs";
 import { FINDING_STATUSES, OUTCOMES } from "./lib/probe-reply.mjs";
 import { privateDirectory, writePrivate } from "./lib/private-fs.mjs";
 
@@ -301,6 +302,16 @@ export function textFieldReader() {
     return out;
   };
 }
+/** CLI flags that keep the learner's own tools, CLAUDE.md, hooks, memory, MCP
+ * servers and slash commands out of every call (the gateway's and the judge's). */
+export const LOCKDOWN_ARGS = Object.freeze([
+  "--tools",
+  "",
+  "--setting-sources",
+  "",
+  "--strict-mcp-config",
+  "--disable-slash-commands",
+]);
 export function claudeArgs({ model, effort, system, stream }) {
   return [
     "-p",
@@ -311,13 +322,7 @@ export function claudeArgs({ model, effort, system, stream }) {
     effort,
     "--system-prompt",
     system,
-    // These keep the learner's own CLAUDE.md, hooks, memory and MCP servers out.
-    "--tools",
-    "",
-    "--setting-sources",
-    "",
-    "--strict-mcp-config",
-    "--disable-slash-commands",
+    ...LOCKDOWN_ARGS,
     "--input-format",
     "stream-json",
     "--output-format",
@@ -622,7 +627,7 @@ function tutorShape(payload, answer) {
   return shape;
 }
 /** The failure's own code in lower-kebab form; a killed timer reads as timeout. */
-function failureOutcome(error) {
+export function failureOutcome(error) {
   if (error?.meta?.timedOut) return "timeout";
   return (
     String(error?.code ?? "")
@@ -631,12 +636,6 @@ function failureOutcome(error) {
       .replace(/_/g, "-") || "error"
   );
 }
-const sumKnown = (values) => {
-  const known = values.filter(
-    (value) => typeof value === "number" && Number.isFinite(value),
-  );
-  return known.length ? known.reduce((total, value) => total + value, 0) : null;
-};
 const REPLAY_KEEP = 24;
 /** One private JSON per finished call, so a ladder can replay real inputs.
  * Capture is best effort: a broken store never fails or delays a call. */

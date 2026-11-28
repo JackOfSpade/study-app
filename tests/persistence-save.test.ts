@@ -56,7 +56,7 @@ test("a failed older durable write cannot overwrite a newer successful local che
       },
     },
   });
-  const g = createRecord(728, r),
+  const g = createRecord(r),
     e = g.encounters["question-0"];
   // This browser's local quota rejects the large checkpoint. A later compact
   // checkpoint can still be written while the first durable transaction is held.

@@ -5,7 +5,6 @@
  */
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-// @ts-expect-error Local .mjs module without a declaration shim (as the tests import it).
 import { parseSetting as ladderParseSetting } from "../ai-ladder.mjs";
 
 /** The ladder's own `<model>:<effort>` grammar (it refuses `max`), typed. */

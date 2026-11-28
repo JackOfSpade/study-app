@@ -48,7 +48,7 @@ test("a background checkpoint skips the local mirror, reaches IndexedDB and fall
       },
     },
   });
-  const g = createRecord(729, r);
+  const g = createRecord(r);
   const durable = save(g, { background: true });
   await settle();
   assert.equal(setItemCalls, 0, "an autosave must not block on localStorage");

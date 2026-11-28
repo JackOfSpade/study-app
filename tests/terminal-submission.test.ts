@@ -54,7 +54,7 @@ function issueDev(g: StudyRecord, e: Encounter, roadmap: Roadmap) {
   e.state = "in-progress";
 }
 async function fixture() {
-  const g = createRecord(701, roadmap);
+  const g = createRecord(roadmap);
   const e = g.encounters["question-0"];
   issueDev(g, e, roadmap);
   await ensureProblem(g, e, roadmap);
