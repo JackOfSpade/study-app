@@ -163,7 +163,7 @@ function usageSection(path, limits) {
   return [
     "## Recent AI calls",
     "",
-    `Newest ${recent.length} of the usage log; ${failed} did not end accepted. Times are UTC and say when each call started; rows are in that order. Phase is the kind of tutor reply or the number of parts in a generated question; turn counts the conversation's messages. Rejected calls record neither.`,
+    `Newest ${recent.length} of the usage log; ${failed} did not end accepted. Times are UTC and say when each call started; rows are in that order. Phase is the kind of tutor reply, the number of parts in a generated question, or the verdict of its review; turn counts the conversation's messages. Rejected calls record neither.`,
     "",
     "| at | operation | phase | turn | attempt | alias/effort | model | outcome | seconds | output tokens | cost USD |",
     "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",

@@ -347,6 +347,12 @@ test("each task runs its chosen model and effort, latest aliases only", () => {
       "lesson-chat": "haiku/high",
     },
   );
+  assert.deepEqual(taskProfile("generate").review, {
+    model: "sonnet",
+    effort: "high",
+    timeoutMs: 600_000,
+  });
+  assert.equal(taskProfile("tutor").review, undefined);
   assert.deepEqual(taskProfile("lesson").stableKeys, [
     "curriculum",
     "lessonPolicy",
@@ -1522,7 +1528,12 @@ test("the generate review stage delivers a revision, the writer's question when 
   }
 
   const single = [];
-  await gateway([JSON.stringify(writer)], single).run("generate", payload);
+  await gateway([JSON.stringify(writer)], single, {
+    profileFor: (operation) => ({
+      ...taskProfile(operation),
+      review: undefined,
+    }),
+  }).run("generate", payload);
   assert.equal(single.length, 1, "no review stage without a review profile");
 });
 

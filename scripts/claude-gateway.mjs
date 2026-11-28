@@ -44,8 +44,10 @@ const KNOWLEDGE_NOTES =
 const MAX_SYSTEM_BYTES = 700_000;
 const TASK_PROFILES = Object.freeze({
   generate: {
-    // Opus high: the 2026-11-28 ladder (docs/AI_MODEL_SELECTION.md).
+    // Opus high writes, then Sonnet high reviews (scripts/lib/question-review.mjs):
+    // the 2026-11-28 ladders in docs/AI_MODEL_SELECTION.md.
     ...authoring("high"),
+    review: { model: "sonnet", effort: "high", timeoutMs: 10 * 60_000 },
     stableKeys: ["curriculum", "generationPolicy", "runtimeSupport"],
   },
   tutor: {
