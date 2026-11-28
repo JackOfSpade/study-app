@@ -319,6 +319,12 @@ test("a question has no total time limit, but each part does", () => {
     instructions,
     /if an earlier part's 'and why' would already state a later part's answer, cut one of the two/,
   );
+  // The regenerated question on 2026-11-28 asked whether a regression test
+  // "would have failed before the release" that introduced the bug.
+  assert.match(
+    instructions,
+    /answer each part yourself, as the learner would, from prompt and that part alone, and make sure its words ask for the answer the rubric expects/,
+  );
   assert.match(
     taskInstructions("assess", { contract }) as string,
     /a result that a later part states is never help for an answer given in an earlier part/,
