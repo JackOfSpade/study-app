@@ -304,189 +304,47 @@ test("a question has no total time limit, but each part does", () => {
     instructions,
     /states that result in one short line before its ask, as the starting point/,
   );
-  assert.match(
-    instructions,
-    /The consecutive steps of a problem too long for one part are not extra asks/,
-  );
-  // A real question on 2026-11-28 asked which test kind would catch a bug, and
-  // why, before asking why the existing tests missed it: the second part was
-  // the first part's reason, asked again in the wrong order.
-  assert.match(
-    instructions,
-    /a diagnosis comes before the remedy it supports \(why the existing tests missed a bug, then which kind of test would catch it\)/,
-  );
-  assert.match(
-    instructions,
-    /if an earlier part's 'and why' would already state a later part's answer, cut one of the two/,
-  );
-  // The regenerated question on 2026-11-28 asked whether a regression test
-  // "would have failed before the release" that introduced the bug.
-  assert.match(
-    instructions,
+  // QUESTION_SHAPE_GUIDANCE: one assertion per rule. Most rules came from real
+  // questions on 2026-11-28 and the generate quality loop that followed (see
+  // docs/QUESTION_DESIGN.md).
+  const shapeRules = [
+    // Short reading.
+    /a few terse facts, only those a correct answer turns on/,
+    /the prompt never previews, lists or defines what the parts ask/,
+    /If removing a sentence, list or code block would change no part's correct answer, remove it/,
+    // One of each kind.
+    /ask about one item of a kind \(the most revealing, or the learner's pick\) and one of each different kind, no more/,
+    /A scope listing several kinds does not oblige one per entry/,
+    /Never ask for a count of one kind \('name two assumptions'\): ask for the one that matters most/,
+    /Write 'identify each', 'list all' or 'for each' only when finding every instance is the assessed skill/,
+    // One ask per part, in reasoning order.
+    /split or cut any that One thing per part counts as several asks, including one that lists what to cover/,
+    /the consecutive steps of a problem too long for one part are not extra asks/,
+    /No part asks for a conclusion whose justification is a later part's answer: a diagnosis comes before its remedy/,
+    /No part repeats an earlier part's reason: a later part tests only what complete earlier answers, including any 'and why', do not already show/,
+    /An ask to audit the learner's own answer[^.]*kept only when the objective assesses that judgement, and then as its own last part/,
+    // Answer check.
     /answer each part yourself, as the learner would, from prompt and that part alone, and make sure its words ask for the answer the rubric expects/,
-  );
-  // The 2026-11-28 generate quality loop (round 1, 2 of 12 passed): rubric
-  // lines required a remedy, a rejected alternative or a rebuttal the ask never
-  // named, and prompts or asks gave the tested insight away.
-  assert.match(
-    instructions,
-    /Check each line against the shortest complete correct answer to its ask as worded, and against a second correct answer that takes another route \(another construct, grouping or qualifying property\); both must satisfy it: a line for a diagnosis never also requires the remedy/,
-  );
-  assert.match(
-    instructions,
-    /a distractor is a claim that must not appear, never a statement the answer must make/,
-  );
-  assert.match(
-    instructions,
-    /A verdict and its reason are one judgement; a remedy, a comparison or a further consequence is another/,
-  );
-  assert.match(
-    instructions,
-    /A value a line requires follows from the stated facts, or the ask names it as the learner's choice to justify/,
-  );
-  assert.match(
-    instructions,
-    /the prompt states facts, never the definition, rule or insight a rubric line checks/,
-  );
-  assert.match(
-    instructions,
-    /a later part never presumes an earlier part's verdict \('the same kind of problem'\)/,
-  );
-  assert.match(
-    instructions,
-    /Ask for a superlative \('worst', 'most important'\) only when the rubric checks one defensible answer/,
-  );
-  assert.match(instructions, /material no part asks about is never kept/);
-  // The 2026-11-28 generate quality loop, round 2 (5 of 12 passed): open asks
-  // whose rubric accepted one of several correct answers, qualities ('smallest',
-  // 'for any input') the ask never named, the same point credited in two parts,
-  // label definitions that turned a sort into a lookup, and 'name two'.
-  assert.match(
-    instructions,
-    /When the facts support more than one correct answer to an open ask \('what cost does this add', 'why is a passing test not enough'\), the line accepts any of them, worded with 'such as', or the ask names the subject the line checks/,
-  );
-  assert.match(
-    instructions,
-    /such as specific figures, a named caveat, a format, a length, a granularity \('one behaviour per pull request'\), 'smallest', 'for any input', grounding in a named fact, a quality the reason must have/,
-  );
-  assert.match(
-    instructions,
-    /a line for an ask to list what a requirement calls for never requires an item the requirement does not state/,
-  );
-  assert.match(
-    instructions,
-    /No two lines credit the same point: what an earlier part's line requires is never required again by a later one/,
-  );
-  assert.match(
-    instructions,
-    /a prompt that defines each label the learner sorts cases into, in the words of the reasons the rubric expects, turns the sort into a lookup/,
-  );
-  assert.match(
-    instructions,
-    /Never ask for a count of items of one kind \('name two assumptions', 'give three risks'\) when one shows the same skill/,
-  );
-  // Round 3 (6 of 12 passed): a 'such as' example that only half fixed the
-  // problem, two alternative findings joined by 'and', one required reason when
-  // others were correct, a required step of a kind the ask never named, and
-  // give-aways through a team guideline, a premise or category vocabulary.
-  assert.match(
-    instructions,
-    /each 'such as' example is itself a complete correct answer to the ask, never a partial fix/,
-  );
-  assert.match(
-    instructions,
-    /a line never joins with 'and' two findings either of which answers the ask, so an ask for one property, reason or difference accepts any one the facts support, worded with 'such as'; and a reason the line requires is any reason the facts support unless the ask names one/,
-  );
-  assert.match(
-    instructions,
-    /a line for an ask that names one kind of item \('the files and functions it passes through'\) never requires an item of another kind/,
-  );
-  assert.match(
-    instructions,
-    /a team guideline, a requirement or a part's premise that states the rule or the reason being tested/,
-  );
-  assert.match(
-    instructions,
-    /an item described in the words of the category or answer it is to be matched to: describe items by behaviour/,
-  );
-  assert.match(
-    instructions,
-    /a premise a part adds keeps in play what the part tests/,
-  );
-  // Round 4 (6 of 12 passed): a line banning `any` where correct answers use
-  // it, a granularity the ask never named, several properties joined for an
-  // ask for one, a reason for an error that is no longer shown, asks naming
-  // the kind of answer or saying the items differ, and a prompt that
-  // previewed the parts' asks.
-  assert.match(
-    instructions,
-    /and against a second correct answer that takes another route \(another construct, grouping or qualifying property\); both must satisfy it/,
-  );
-  assert.match(
-    instructions,
-    /never bans a construct, keyword or technique the ask does not rule out/,
-  );
-  assert.match(
-    instructions,
-    /a granularity \('one behaviour per pull request'\)/,
-  );
-  assert.match(
-    instructions,
-    /an ask for one property, reason or difference accepts any one the facts support, worded with 'such as'/,
-  );
-  assert.match(
-    instructions,
-    /a line for why something is shown never requires why something else is not/,
-  );
-  assert.match(
-    instructions,
-    /names the kind of answer being tested \('replace it with the native element'/,
-  );
-  assert.match(
-    instructions,
-    /hints how many cases or kinds there are or that they differ \('as three different kinds'\)/,
-  );
-  assert.match(
-    instructions,
-    /the prompt never previews, lists or defines what the parts will ask for/,
-  );
-  // Round 5 (6 of 12 passed): lines still required elements the ask never
-  // named (test build details, segment properties, coverage of named cases,
-  // a reason's quality), an ask claimed one missing piece where the facts
-  // left two, a trace left out the click that focused the input, a 'such as'
-  // fix broke a stated requirement, and a prompt defined the term tested.
-  assert.match(
-    instructions,
-    /to check, quote for each element a line requires the words of its ask that request it, and cut from the line, or name in the ask, every element that has none/,
-  );
-  assert.match(
-    instructions,
-    /a quality the reason must have \('grounded in a constraint, not a preference'\), properties each item must carry or coverage of named cases/,
-  );
-  assert.match(
-    instructions,
-    /never also requires how it is built \(a test's setup, forced inputs or assertions\)/,
-  );
-  assert.match(
-    instructions,
-    /or a change that breaks another requirement the prompt or part states/,
-  );
-  assert.match(
-    instructions,
-    /An ask that says the material holds exactly one of something \('the one piece the plan leaves out', 'the bug'\) must be true of the facts/,
-  );
-  assert.match(
-    instructions,
-    /the facts state every action from the start that produces output, including how an element got focus or state/,
-  );
-  assert.match(
-    instructions,
-    /nor a definition of the term the question is about, which it uses bare because grasping it is what is tested/,
-  );
-  assert.match(
-    instructions,
-    /or lists what to cover \('describe it: what \.\.\., which \.\.\. and why \.\.\.'\), it is several asks/,
-  );
+    /never presumes an earlier verdict/,
+    /An ask claiming exactly one of something \('the bug'\) must be true/,
+    /A trace states every action from the start that produces output/,
+    /prompt and parts state facts, never the definition, rule or insight a rubric line checks, such as a definition of the term being tested/,
+    /An ask never rules out a candidate answer \('rather than X'\) or names the kind of answer tested/,
+    /a premise a part adds keeps what the part tests in play/,
+    /Ask for a superlative \('worst'\) only when one answer is defensible/,
+    // Rubric check.
+    /each line is one checkable judgement, never one per list entry\. A verdict and its reason are one judgement/,
+    /No two lines credit the same point/,
+    /Quote the ask: for each element the line requires[^.]*quote the ask's words that request it, and cut from the line, or name in the ask, every element with none/,
+    /A line checks the outcome the ask names, never bans a construct the ask allows/,
+    /a distractor is a claim that must not appear/,
+    /Second route: the shortest complete correct answer to the ask as worded and one taking another route[^.]*must both satisfy the line/,
+    /the line accepts any, worded with 'such as', or the ask names the subject checked; a line never joins with 'and' two findings/,
+    /Each 'such as' example is a complete correct answer, never a partial fix or one that breaks another stated requirement/,
+    /A line never requires an item the stated requirement, or an earlier part's 'at least N of', left out/,
+    /A line for a composed answer lists the claims that must not appear and the elements the ask names, never one preferred wording/,
+  ];
+  for (const rule of shapeRules) assert.match(QUESTION_SHAPE_GUIDANCE, rule);
   assert.match(
     taskInstructions("assess", { contract }) as string,
     /a result that a later part states is never help for an answer given in an earlier part/,
@@ -865,16 +723,15 @@ test("minimum evidence leads generation and tutoring, and the shape rules come l
   assert.equal(generate.split(QUESTION_DESIGN_GUIDANCE).length, 2);
   assert.match(
     generate,
-    /never drop a fact a correct answer needs; beyond that, cut/,
+    /Never drop a fact a correct answer needs; beyond that, cut/,
   );
   assert.match(
     generate,
-    /one facet per distinct understanding, never one per list member/,
+    /Never write one facet per list member or per item worked the same way/,
   );
-  assert.match(generate, /ask for one of each kind and no more/);
   assert.match(
     generate,
-    /Add an ask only when it tests something the first does not/,
+    /A second item, part, facet or follow-up is allowed only when it tests something the first does not/,
   );
   // Each part asks for one thing, so a compound ask is split or cut.
   assert.match(
@@ -882,7 +739,6 @@ test("minimum evidence leads generation and tutoring, and the shape rules come l
     /a part asks for exactly one answer about one subject/,
   );
   assert.match(generate, /never merge asks to lower the part count/);
-  assert.match(generate, /if it requests more than one answer/);
   assert.match(generate, /pick a real project of their own/);
   assert.match(generate, /at most four one-line facts/);
   assert.match(generate, /a learner who already has this skill needs/);
