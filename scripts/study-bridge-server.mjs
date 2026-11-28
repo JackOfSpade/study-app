@@ -4,15 +4,17 @@ import { executionRoute } from "./execution-route.mjs";
 import { AI_OPERATIONS } from "./lib/ai-contracts.mjs";
 import { isRecord } from "./lib/is-record.mjs";
 
-/** Construct the actual loopback relay without launching Vite, for isolated transport verification. */
-// "connected", "gateway-off", or the gateway's own reason (for example
-// "cli-missing" or "signed-out").
+/**
+ * "connected", "gateway-off", or the gateway's own reason (for example
+ * "cli-missing" or "signed-out").
+ */
 export async function claudeConnection(claude) {
   return !claude?.enabled()
     ? "gateway-off"
     : ((await claude.connection?.()) ?? "connected");
 }
 
+/** Construct the actual loopback relay without launching Vite, for isolated transport verification. */
 export function createStudyBridgeServer({ claude, control, reports } = {}) {
   return createServer(async (req, res) => {
     res.setHeader("Content-Type", "application/json");

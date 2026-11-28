@@ -722,6 +722,7 @@ function closeTerminal() {
   if (e) e.chatOpen = false;
   active = undefined;
   $("#terminal").hidden = true;
+  terminalPanels.reset();
   void persistNow();
 }
 /** Opens a question in the workspace's terminal. */

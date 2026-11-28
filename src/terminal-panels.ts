@@ -261,5 +261,14 @@ export function createTerminalPanels(host: TerminalPanelHost) {
     });
   }
 
-  return { requestStatus, messages };
+  /** Forget what the conversation showed: the terminal closed, so the next
+   * render is an opening (it scrolls to the latest message, announces
+   * nothing) even when the same question, or an imported record reusing its
+   * id, opens again. */
+  function reset() {
+    shownEncounter = undefined;
+    shownMessages = 0;
+  }
+
+  return { requestStatus, messages, reset };
 }

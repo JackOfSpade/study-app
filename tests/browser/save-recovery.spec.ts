@@ -344,3 +344,51 @@ test("a save under the earlier storage names loads and then moves to the new nam
     ),
   ).toBe("Synthetic draft saved by the earlier build");
 });
+
+test("an import that reopens the same question does not announce its saved replies as new", async ({
+  page,
+}) => {
+  await mockClaudeStudy(page);
+  const id = await openStudyQuestion(page);
+  await flushStudySave(page);
+  // The same record with tutor replies on the open question, as a backup that
+  // reuses its question id (older saves did).
+  const backup = await page.evaluate(async (id) => {
+    const root = "/src/";
+    const { decode, encode } = await import(
+      /* @vite-ignore */ root + "persistence.ts"
+    );
+    const copy = decode(encode((window as any).__studyApp.record));
+    const e = copy.encounters[id];
+    let seq = Math.max(0, ...e.tutor.map((m: { seq: number }) => m.seq));
+    for (let i = 0; i < 3; i++)
+      e.tutor.push({
+        id: `synthetic-reply-${i}`,
+        author: "Terminal AI",
+        kind: "tutor",
+        text: `Synthetic saved tutor reply ${i}.`,
+        seq: ++seq,
+        worldTime: e.tutor.at(-1)?.worldTime ?? 0,
+      });
+    copy.seq += 1;
+    return encode(copy);
+  }, id);
+  await openAgentMenu(page);
+  await page.locator("#settings-toggle").click();
+  await page.locator("#import").setInputFiles({
+    name: "synthetic-same-question.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(backup),
+  });
+  await expect(page.locator("#messages")).toContainText(
+    "Synthetic saved tutor reply 2",
+  );
+  // The terminal closed for the import, so reopening it is an opening: the
+  // conversation is read from a saved record, not a reply that just arrived.
+  await page.evaluate(
+    () => new Promise((done) => requestAnimationFrame(() => done(undefined))),
+  );
+  await expect(page.locator("#tutor-announce")).not.toHaveText(
+    "Tutor replied.",
+  );
+});
