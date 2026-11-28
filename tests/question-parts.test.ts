@@ -378,6 +378,36 @@ test("a part that asks for more than one thing is sent back, a single ask is not
     compoundPartProblem(["Give three risks of this rollout."]) ?? "",
     /'Give three risks' asks for several items of one kind/,
   );
+  // Round 5: several asks listed in one sentence, after a colon or with 'and'.
+  assert.match(
+    compoundPartProblem([
+      "Describe the first slice: what the user does in it, which layers it touches, and why it can be verified on its own.",
+    ]) ?? "",
+    /'what the user does in it, which layers it touches' lists several asks in one sentence/,
+  );
+  assert.match(
+    compoundPartProblem([
+      "For each value, say who is authoritative for it and how long it lives.",
+    ]) ?? "",
+    /^parts\[0\] asks for more than one thing/,
+  );
+  assert.match(
+    compoundPartProblem([
+      "Describe what the user sees and what they can do.",
+    ]) ?? "",
+    /lists several asks in one sentence/,
+  );
+  // One answer with its reason or its evidence, a time clause, and a
+  // relative clause in a fact are not listed asks.
+  assert.equal(
+    compoundPartProblem([
+      "What does the console print, in order, and why?",
+      "Which category is the main cause of the wait, and what in the trace shows it?",
+      "What happens when the user types and when they click Send?",
+      "Her team, which is on Studio and which she pays for, owns it. Which check rejects the request first, and why?",
+    ]),
+    undefined,
+  );
   // One value that happens to hold a number is not a count of items.
   assert.equal(
     compoundPartProblem([

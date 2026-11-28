@@ -367,7 +367,7 @@ test("a question has no total time limit, but each part does", () => {
   );
   assert.match(
     instructions,
-    /such as specific figures, a named caveat, a format, a length, a granularity \('one behaviour per pull request'\), 'smallest', 'for any input' or grounding in a named fact, the ask names it/,
+    /such as specific figures, a named caveat, a format, a length, a granularity \('one behaviour per pull request'\), 'smallest', 'for any input', grounding in a named fact, a quality the reason must have/,
   );
   assert.match(
     instructions,
@@ -449,6 +449,43 @@ test("a question has no total time limit, but each part does", () => {
   assert.match(
     instructions,
     /the prompt never previews, lists or defines what the parts will ask for/,
+  );
+  // Round 5 (6 of 12 passed): lines still required elements the ask never
+  // named (test build details, segment properties, coverage of named cases,
+  // a reason's quality), an ask claimed one missing piece where the facts
+  // left two, a trace left out the click that focused the input, a 'such as'
+  // fix broke a stated requirement, and a prompt defined the term tested.
+  assert.match(
+    instructions,
+    /to check, quote for each element a line requires the words of its ask that request it, and cut from the line, or name in the ask, every element that has none/,
+  );
+  assert.match(
+    instructions,
+    /a quality the reason must have \('grounded in a constraint, not a preference'\), properties each item must carry or coverage of named cases/,
+  );
+  assert.match(
+    instructions,
+    /never also requires how it is built \(a test's setup, forced inputs or assertions\)/,
+  );
+  assert.match(
+    instructions,
+    /or a change that breaks another requirement the prompt or part states/,
+  );
+  assert.match(
+    instructions,
+    /An ask that says the material holds exactly one of something \('the one piece the plan leaves out', 'the bug'\) must be true of the facts/,
+  );
+  assert.match(
+    instructions,
+    /the facts state every action from the start that produces output, including how an element got focus or state/,
+  );
+  assert.match(
+    instructions,
+    /nor a definition of the term the question is about, which it uses bare because grasping it is what is tested/,
+  );
+  assert.match(
+    instructions,
+    /or lists what to cover \('describe it: what \.\.\., which \.\.\. and why \.\.\.'\), it is several asks/,
   );
   assert.match(
     taskInstructions("assess", { contract }) as string,

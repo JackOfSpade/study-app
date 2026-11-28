@@ -99,6 +99,32 @@ const PER_ITEM =
 const COUNTED =
   /\b(?:give|name|list|identify|state|suggest|propose)\s+(?:the\s+|any\s+|at least\s+|up to\s+)?(?:two|three|four|five|[2-5])\s+(?!(?:times|minutes|seconds|ms|hours|days)\b)[a-z][\w-]*/i;
 
+// Two or more asks listed in one sentence ("describe it: what the user
+// does, which layers it touches, and why"; "say who owns it and how long it
+// lives"), as opposed to one answer with its reason ("what is logged, in
+// order, and why") or a time clause ("and when the user clicks"). Only a
+// request sentence is read, so a fact ("her team, which is on Studio and
+// which she pays for") is not an ask, and nor is the evidence for the one
+// answer ("and what in the trace shows it").
+const LISTED =
+  /\b(?:what|which|who|where|when|how)\b[^.?!;\n]*?(?:,\s*(?:and\s+)?|\s+and\s+)((?:what|which|who|where|how)\b[^,.?!;\n]*)/i;
+const EVIDENCE = /^(?:what|which)\b.*\b(?:shows?|supports?|proves?)\b/i;
+// An ask verb opening the sentence, even before a clause ("say who is ...").
+const ASK_START = new RegExp(
+  `^(?:[^,.?]{0,60}, )?(?:then |also |next |finally |now )?(?:${ASK_VERBS})\\b`,
+  "i",
+);
+
+/** The first request sentence of a part that lists several asks. */
+function listedAsks(prose) {
+  return prose
+    .split(/(?<=[.?!])\s+|\n+/)
+    .map((sentence) => sentence.replace(/^[\s>*\-\d.)]+/, "").trim())
+    .filter((sentence) => sentence.endsWith("?") || ASK_START.test(sentence))
+    .map((sentence) => LISTED.exec(sentence))
+    .find((found) => found && !EVIDENCE.test(found[1]));
+}
+
 /** Why a generated part asks for more than one thing, or undefined. This is
  * a reading of prose, so the caller treats it as advice for one correction,
  * never as grounds to refuse a question outright. */
@@ -113,13 +139,17 @@ export function compoundPartProblem(parts) {
       .replace(/`[^`\n]*`/g, "x");
     const perItem = PER_ITEM.exec(prose);
     const counted = COUNTED.exec(prose);
-    if (requests.length < 2 && !same && !perItem && !counted) continue;
+    const listed = listedAsks(prose);
+    if (requests.length < 2 && !same && !perItem && !counted && !listed)
+      continue;
     const quoted = requests.map((r) => `"${r.slice(0, 90)}"`).join(", ");
     const items = perItem
       ? ` '${perItem[0]}' asks for one answer per item: ask about the one most revealing item, or give an item that needs different reasoning its own part.`
       : counted
         ? ` '${counted[0]}' asks for several items of one kind: ask for the one that matters most, unless each item tests something the others do not, then give each its own part.`
-        : "";
+        : listed
+          ? ` '${listed[0].slice(0, 90)}' lists several asks in one sentence: each 'what', 'which', 'who', 'where' or 'how' is its own answer; only 'and why' for the one answer may stay with it.`
+          : "";
     return `parts[${index}] asks for more than one thing${quoted ? ` (${quoted})` : ""}.${items} Each part asks for exactly one answer about one subject, and the learner must never face two requests at once. Keep one request in that part and give each other request its own part, in the order to be worked, or cut a request the skill does not need. Do not join the requests into one sentence with 'and', and do not add 'do the same for'. Check every other part the same way, and keep prompt, rubric and scopeDefinitions consistent with the result.`;
   }
   return undefined;
