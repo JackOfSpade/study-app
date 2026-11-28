@@ -308,6 +308,17 @@ test("a question has no total time limit, but each part does", () => {
     instructions,
     /The consecutive steps of a problem too long for one part are not extra asks/,
   );
+  // A real question on 2026-11-28 asked which test kind would catch a bug, and
+  // why, before asking why the existing tests missed it: the second part was
+  // the first part's reason, asked again in the wrong order.
+  assert.match(
+    instructions,
+    /a diagnosis comes before the remedy it supports \(why the existing tests missed a bug, then which kind of test would catch it\)/,
+  );
+  assert.match(
+    instructions,
+    /if an earlier part's 'and why' would already state a later part's answer, cut one of the two/,
+  );
   assert.match(
     taskInstructions("assess", { contract }) as string,
     /a result that a later part states is never help for an answer given in an earlier part/,

@@ -125,7 +125,9 @@ function usageSection(path, limits) {
   const phase = (row) =>
     row.phase ??
     row.mode ??
-    (Number.isInteger(row.parts) ? `${row.parts} parts` : undefined);
+    (Number.isInteger(row.parts)
+      ? `${row.parts} ${row.parts === 1 ? "part" : "parts"}`
+      : undefined);
   const turn = (row) =>
     row.conversationTurn ??
     (row.turn === null || row.turn === undefined
