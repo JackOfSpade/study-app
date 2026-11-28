@@ -340,7 +340,7 @@ test("each task runs its chosen model and effort, latest aliases only", () => {
     {
       tutor: "sonnet/low",
       assess: "haiku/high",
-      generate: "opus/medium",
+      generate: "opus/high",
       "review-environment": "haiku/medium",
       "reconcile-roadmap": "opus/high",
       lesson: "opus/high",

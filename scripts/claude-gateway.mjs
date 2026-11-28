@@ -43,7 +43,8 @@ const KNOWLEDGE_NOTES =
 const MAX_SYSTEM_BYTES = 700_000;
 const TASK_PROFILES = Object.freeze({
   generate: {
-    ...authoring(),
+    // Opus high: the 2026-11-28 ladder (docs/AI_MODEL_SELECTION.md).
+    ...authoring("high"),
     stableKeys: ["curriculum", "generationPolicy", "runtimeSupport"],
   },
   tutor: {
