@@ -1433,3 +1433,123 @@ test("a tutor reply logs its mode, turn, outcome and help as counts", () => {
     {},
   );
 });
+
+test("the generate review stage delivers a revision, the writer's question when it finds nothing, and never blocks on its own failure", async () => {
+  const writer = {
+    title: "Upload retries",
+    prompt: "Facts.",
+    parts: ["Ask one?", "Ask two?"],
+    starter: "",
+    rubric: ["Line one.", "Line two."],
+    contract: { track: "PE", depth: 2 },
+    scopeDefinitions: [{ id: "s" }],
+    estimatedSolveSeconds: 300,
+    partSolveSeconds: [120, 180],
+  };
+  const profileFor = (operation) => ({
+    ...taskProfile(operation),
+    review: { model: "sonnet", effort: "medium" },
+  });
+  const payload = { requestId: "r", contract: { track: "PE", depth: 2 } };
+  const run = async (reviewReply) => {
+    const calls = [];
+    const rows = [];
+    const text = (reply) =>
+      typeof reply === "string" || reply?.result
+        ? reply
+        : JSON.stringify(reply);
+    const answer = await gateway([text(writer), text(reviewReply)], calls, {
+      profileFor,
+      usageLog: (row) => rows.push(row),
+    }).run("generate", { ...payload, requestId: `r-${Math.random()}` });
+    return { answer, calls, rows };
+  };
+
+  const ok = await run({ verdict: "ok" });
+  assert.deepEqual(ok.answer, writer);
+  assert.equal(ok.calls.length, 2);
+  const reviewArgs = ok.calls[1].args;
+  assert.equal(reviewArgs[reviewArgs.indexOf("--model") + 1], "sonnet");
+  assert.match(
+    ok.calls[1].input,
+    /\\"question\\":\{\\"title\\":\\"Upload retries\\"/,
+  );
+  assert.deepEqual(
+    ok.rows.map((row) => [
+      row.stage ?? "write",
+      row.alias,
+      row.outcome,
+      row.review,
+    ]),
+    [
+      ["write", "opus", "accepted", undefined],
+      ["review", "sonnet", "accepted", "ok"],
+    ],
+  );
+
+  const revised = await run({
+    verdict: "revised",
+    changes: ["Cut a rubric element the ask does not name."],
+    ...writer,
+    rubric: ["Line one.", "Line two, narrowed."],
+    // A reviewer cannot move the assessed scope.
+    scopeDefinitions: [{ id: "other" }],
+    contract: { track: "PY", depth: 1 },
+  });
+  assert.deepEqual(revised.answer.rubric, ["Line one.", "Line two, narrowed."]);
+  assert.deepEqual(revised.answer.scopeDefinitions, writer.scopeDefinitions);
+  assert.deepEqual(revised.answer.contract, writer.contract);
+  assert.equal(revised.rows[1].review, "revised");
+  assert.equal(revised.rows[1].changes, 1);
+
+  for (const broken of [
+    "not json",
+    { verdict: "maybe" },
+    { verdict: "revised", prompt: "Only one field." },
+    { verdict: "revised", ...writer, rubric: ["Too few lines."] },
+    {
+      result: {
+        type: "result",
+        subtype: "error",
+        is_error: true,
+        result: "boom",
+      },
+    },
+  ]) {
+    const kept = await run(broken);
+    assert.deepEqual(kept.answer, writer, JSON.stringify(broken));
+    assert.notEqual(kept.rows[1].outcome, "accepted");
+  }
+
+  const single = [];
+  await gateway([JSON.stringify(writer)], single).run("generate", payload);
+  assert.equal(single.length, 1, "no review stage without a review profile");
+});
+
+test("a revision that fails validation keeps the writer's question", async () => {
+  const writer = {
+    title: "T",
+    prompt: "P",
+    parts: ["One?"],
+    starter: "",
+    rubric: ["R"],
+    scopeDefinitions: [{ id: "s" }],
+  };
+  const answer = await gateway(
+    [
+      JSON.stringify(writer),
+      JSON.stringify({ verdict: "revised", ...writer, prompt: "BAD" }),
+    ],
+    [],
+    {
+      profileFor: (operation) => ({
+        ...taskProfile(operation),
+        review: { model: "sonnet", effort: "medium" },
+      }),
+      validate: (_job, a) => {
+        if (a.prompt === "BAD") throw Error("invalid");
+      },
+    },
+  ).run("generate", { requestId: "v" });
+  assert.equal(answer.prompt, "P");
+});

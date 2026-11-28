@@ -191,6 +191,13 @@ test("the AI call table reads today's usage rows and lists them by start time", 
       row({ at: "2026-11-23T07:00:00.000Z", operation: "generate", parts: 3 }),
       row({ at: "2026-11-23T07:30:00.000Z", operation: "generate", parts: 1 }),
       row({
+        at: "2026-11-23T07:31:00.000Z",
+        operation: "generate",
+        stage: "review",
+        review: "revised",
+        parts: 1,
+      }),
+      row({
         at: "2026-11-23T06:00:00.000Z",
         operation: "generate",
         parts: null,
@@ -217,12 +224,13 @@ test("the AI call table reads today's usage rows and lists them by start time", 
         "| 2026-11-23T06:00:00.000Z | generate |  | ",
         "| 2026-11-23T07:00:00.000Z | generate | 3 parts | ",
         "| 2026-11-23T07:30:00.000Z | generate | 1 part | ",
+        "| 2026-11-23T07:31:00.000Z | generate | review: revised | ",
         "| 2026-11-23T07:57:18.000Z | tutor | terminal-dialogue | 7 (part 2/3)",
         "| 2026-11-23T07:59:15.000Z | assess |  | ",
         "| 2026-11-23T07:59:20.000Z | tutor | terminal-review | 11",
       ],
     );
-    assert.match(markdown, /Newest 7 of the usage log; 0 did not end accepted/);
+    assert.match(markdown, /Newest 8 of the usage log; 0 did not end accepted/);
     assert.match(
       markdown,
       /say when each call started; rows are in that order/,

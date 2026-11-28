@@ -481,3 +481,16 @@ test("only narrows the ladder to the named operations", async () => {
     [["b", "assess"]],
   );
 });
+
+test("a setting may name a second stage, and a plain setting has none", async () => {
+  const { parseSetting } = await import("../scripts/ai-ladder.mjs");
+  assert.deepEqual(parseSetting("opus:high+sonnet:medium"), {
+    model: "opus",
+    effort: "high",
+    review: { model: "sonnet", effort: "medium" },
+    setting: "opus:high+sonnet:medium",
+  });
+  assert.equal(parseSetting("opus:high").review, undefined);
+  assert.throws(() => parseSetting("opus:high+sonnet:max"), /effort/);
+  assert.throws(() => parseSetting("opus:high+a:b+c:d"), /at most one/);
+});

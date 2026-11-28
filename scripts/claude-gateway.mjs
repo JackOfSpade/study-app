@@ -15,6 +15,7 @@ import { delimiter, dirname, join } from "node:path";
 import { taskInstructions, validateAnswer } from "./lib/ai-contracts.mjs";
 import { fillOmittedHelp, helpStreamGate } from "./lib/help-gate.mjs";
 import { isRecord } from "./lib/is-record.mjs";
+import { applyReview, reviewPrompt } from "./lib/question-review.mjs";
 import { sumKnown } from "./lib/measure.mjs";
 import { FINDING_STATUSES, OUTCOMES } from "./lib/probe-reply.mjs";
 import { privateDirectory, writePrivate } from "./lib/private-fs.mjs";
@@ -838,6 +839,76 @@ export function createClaudeGateway({
         `${JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "text", text: user }] } })}\n`,
       );
     });
+  /** The generate review stage (see scripts/lib/question-review.mjs): one
+   * fresh read of a question that has already passed validation. It can only
+   * improve it: a failed call, a reply that does not parse or a revision that
+   * fails validation delivers the writer's question unchanged, and only a
+   * cancellation stops. `log(meta, outcome, shape)` records the call. */
+  async function reviewGenerated(
+    payload,
+    answer,
+    reviewer,
+    { signal, cancelled, log = () => {} } = {},
+  ) {
+    const job = { operation: "generate", payload };
+    let done;
+    try {
+      done = await runOnce({
+        profile: reviewer,
+        ...reviewPrompt(payload, answer),
+        signal,
+      });
+    } catch (error) {
+      if (signal?.aborted && cancelled) throw cancelled();
+      log(error.meta, failureOutcome(error), { stage: "review" });
+      console.error(
+        `Question review failed; kept the writer's question: ${String(error?.message ?? error).slice(0, 200)}`,
+      );
+      return { answer, review: "kept", changes: [], meta: error.meta };
+    }
+    try {
+      const parsed = firstJsonObject(done.text);
+      if (!parsed) throw Error("The review reply was not one JSON object");
+      const { answer: revised, changes } = applyReview(
+        answer,
+        trimmedKeys(parsed),
+      );
+      if (revised !== answer) validate(job, revised, { final: false });
+      const review = revised === answer ? "ok" : "revised";
+      log(done.meta, "accepted", {
+        stage: "review",
+        review,
+        changes: changes.length,
+        ...replyShape(job, revised),
+      });
+      return { answer: revised, review, changes, meta: done.meta };
+    } catch (error) {
+      log(done.meta, "rejected", { stage: "review" });
+      console.error(
+        `Question review refused; kept the writer's question: ${String(error?.message ?? error).slice(0, 300)} | ${replySkeleton(done.text)}`,
+      );
+      return {
+        answer,
+        review: "kept",
+        changes: [],
+        meta: done.meta,
+        problem: String(error?.message ?? error),
+      };
+    }
+  }
+  /** Review one already generated question on its own (measurement: the
+   * same writer output reviewed by several settings). */
+  async function review(payload, answer, reviewer) {
+    await slot();
+    try {
+      return await reviewGenerated(payload, answer, {
+        timeoutMs: taskProfile("generate").timeoutMs,
+        ...reviewer,
+      });
+    } finally {
+      release();
+    }
+  }
   async function execute(operation, payload, signal, onText) {
     const profile = resolveProfile(operation, payload);
     const dialogue =
@@ -855,15 +926,15 @@ export function createClaudeGateway({
       const cancelled = () =>
         new ClaudeGatewayError("CLAUDE_CANCELLED", "Request cancelled", 499);
       const job = { operation, payload };
-      const logCall = (call, meta, outcome, shape) => {
+      const logCall = (call, meta, outcome, shape, by = profile) => {
         const measured = meta ?? {};
         const row = {
           v: 1,
           at: measured.at ?? new Date(now()).toISOString(),
           operation,
           attempt: call.attempt,
-          alias: profile.model,
-          effort: profile.effort,
+          alias: by.model,
+          effort: by.effort,
           model: measured.model ?? null,
           costUsd: measured.costUsd ?? null,
           inputTokens: measured.inputTokens ?? null,
@@ -880,6 +951,16 @@ export function createClaudeGateway({
         };
         rows.push(row);
         logUsage?.(row);
+      };
+      const reviewQuestion = async (answer) => {
+        const reviewer = { timeoutMs: profile.timeoutMs, ...profile.review };
+        const result = await reviewGenerated(payload, answer, reviewer, {
+          signal,
+          cancelled,
+          log: (meta, outcome, shape) =>
+            logCall({ attempt: 0 }, meta, outcome, shape, reviewer),
+        });
+        return result.answer;
       };
       let prompt = user,
         problem;
@@ -928,8 +1009,11 @@ export function createClaudeGateway({
           }
           validate(job, answer, { final: attempt === attempts - 1 });
           logCall(call, measured, "accepted", replyShape(job, answer));
-          answered = answer;
-          return answer;
+          answered =
+            operation === "generate" && profile.review
+              ? await reviewQuestion(answer)
+              : answer;
+          return answered;
         } catch (error) {
           problem = String(error?.message ?? error);
           logCall(call, measured, "rejected");
@@ -1106,5 +1190,5 @@ export function createClaudeGateway({
       });
     return checking;
   };
-  return { run, enabled: () => true, connection };
+  return { run, review, enabled: () => true, connection };
 }

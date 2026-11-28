@@ -123,6 +123,7 @@ function usageSection(path, limits) {
   // reply it was (or how many parts a generated question has) and how many
   // messages the conversation held, with the open part where there is one.
   const phase = (row) =>
+    (row.stage === "review" ? `review: ${row.review ?? row.outcome}` : null) ??
     row.phase ??
     row.mode ??
     (Number.isInteger(row.parts)

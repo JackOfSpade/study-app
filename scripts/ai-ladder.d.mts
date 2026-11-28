@@ -1,7 +1,9 @@
 export interface LadderSetting {
   model: string;
   effort: string;
-  /** `model:effort`. */
+  /** The second stage's model and effort (`model:effort+model:effort`). */
+  review?: { model: string; effort: string };
+  /** `model:effort`, or `model:effort+model:effort`. */
   setting: string;
 }
 export interface LadderCase {

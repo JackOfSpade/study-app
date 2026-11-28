@@ -67,24 +67,43 @@ export function parseList(value) {
   return list.map((entry) => String(entry).trim()).filter(Boolean);
 }
 
-/** `model:effort`, refusing anything production never offers (e.g. `max`). */
-export function parseSetting(value) {
-  const text = String(value ?? "").trim();
+/** One `model:effort`, refusing anything production never offers (e.g. `max`). */
+function parseOne(text, whole) {
   const match = /^([a-z0-9]+):([a-z0-9]+)$/.exec(text);
   if (!match)
     throw Error(
-      `Invalid setting "${text}": expected <haiku|sonnet|opus>:<low|medium|high|xhigh>`,
+      `Invalid setting "${whole}": expected <haiku|sonnet|opus>:<low|medium|high|xhigh>`,
     );
   const [, model, effort] = match;
   if (!MODELS.includes(model))
     throw Error(
-      `Invalid setting "${text}": model must be haiku, sonnet or opus (got "${model}")`,
+      `Invalid setting "${whole}": model must be haiku, sonnet or opus (got "${model}")`,
     );
   if (!EFFORTS.includes(effort))
     throw Error(
-      `Invalid setting "${text}": effort must be low, medium, high or xhigh (got "${effort}")`,
+      `Invalid setting "${whole}": effort must be low, medium, high or xhigh (got "${effort}")`,
     );
-  return { model, effort, setting: `${model}:${effort}` };
+  return { model, effort };
+}
+
+/** `model:effort`, or `model:effort+model:effort` for a call with a second
+ * stage (the generate review). An arm runs exactly what its setting names: a
+ * plain setting has no second stage even when production configures one. */
+export function parseSetting(value) {
+  const text = String(value ?? "").trim();
+  const [first, second, extra] = text.split("+");
+  if (extra !== undefined)
+    throw Error(`Invalid setting "${text}": at most one + stage`);
+  const { model, effort } = parseOne(first, text);
+  if (second === undefined)
+    return { model, effort, setting: `${model}:${effort}` };
+  const review = parseOne(second, text);
+  return {
+    model,
+    effort,
+    review,
+    setting: `${model}:${effort}+${review.model}:${review.effort}`,
+  };
 }
 
 export function parseSettings(settings) {
@@ -269,6 +288,7 @@ export async function runLadder({
         ...taskProfile(operation, payload),
         model: setting.model,
         effort: setting.effort,
+        review: setting.review,
       }),
       usageLog: (row) => usageRows.push(row),
     });
